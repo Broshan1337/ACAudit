@@ -4,12 +4,17 @@ import com.example.addon.commands.CommandExample;
 import com.example.addon.hud.HudExample;
 import com.example.addon.modules.ModuleExample;
 import com.example.addon.modules.antidupe.AuctionRace;
+import com.example.addon.modules.antidupe.CloseClick;
 import com.example.addon.modules.antidupe.ContainerExploit;
 import com.example.addon.modules.antidupe.DropPickupDupe;
 import com.example.addon.modules.antidupe.EconFuzz;
+import com.example.addon.modules.antidupe.GuiClicker;
 import com.example.addon.modules.antidupe.InteractionFlood;
+import com.example.addon.modules.antidupe.ManualClick;
 import com.example.addon.modules.antidupe.SellRace;
 import com.example.addon.modules.antidupe.SlotExploit;
+import com.example.addon.modules.antidupe.SlotOverlay;
+import com.example.addon.modules.antidupe.TwoWindowRace;
 import com.example.addon.modules.crash.*;
 import com.example.addon.modules.movement.AirJump;
 import com.example.addon.modules.movement.AntiSetback;
@@ -79,6 +84,11 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new EconFuzz());
         Modules.get().add(new SellRace());
         Modules.get().add(new AuctionRace());
+        Modules.get().add(new GuiClicker());
+        Modules.get().add(new ManualClick());
+        Modules.get().add(new TwoWindowRace());
+        Modules.get().add(new CloseClick());
+        Modules.get().add(new SlotOverlay());
 
         // --- Crash / stability ---
         Modules.get().add(new PayloadFlood());
@@ -104,6 +114,11 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new PacketSpammer());
         Modules.get().add(new SequenceCrash());
         Modules.get().add(new WindowCrash());
+
+        // --- Fast-action rate testers ---
+        Modules.get().add(new FastMine());
+        Modules.get().add(new FastUse());
+        Modules.get().add(new FastAttack());
 
         // --- Test harness ---
         Modules.get().add(new ServerHealthMonitor());

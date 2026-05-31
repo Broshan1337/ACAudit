@@ -5,7 +5,8 @@
   "client": [
     "ExampleMixin",
     "TimerMixin",
-    "NoSlowMixin"
+    "NoSlowMixin",
+    "SlotOverlayMixin"
   ],
   "injectors": {
     "defaultRequire": 1
