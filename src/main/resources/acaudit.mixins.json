@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.example.addon.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ExampleMixin",
+    "TimerMixin",
+    "NoSlowMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
