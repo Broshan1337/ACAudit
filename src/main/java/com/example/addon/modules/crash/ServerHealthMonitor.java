@@ -38,7 +38,7 @@ public class ServerHealthMonitor extends Module {
     private int lastLogSecond = -1;
 
     public ServerHealthMonitor() {
-        super(AddonTemplate.CRASH_CATEGORY, "server-health-monitor",
+        super(AddonTemplate.TESTING_CATEGORY, "server-health-monitor",
             "Passively estimates server TPS (from time-update cadence) and ping. Measurement source for soak tests.");
     }
 

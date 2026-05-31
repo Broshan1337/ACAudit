@@ -31,10 +31,16 @@ import java.util.Deque;
 public class PingSpoof extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
+    private final Setting<Boolean> maxWindow = sgGeneral.add(new BoolSetting.Builder()
+        .name("max-window")
+        .description("Keepalive starvation: hold responses ~29s, just under the ~30s server timeout, for the maximum lag window without disconnecting. Overrides delay-ms.")
+        .defaultValue(false).build()
+    );
     private final Setting<Integer> delayMs = sgGeneral.add(new IntSetting.Builder()
         .name("delay-ms")
         .description("How long to hold KeepAlive responses (added apparent ping).")
-        .defaultValue(500).range(0, 10000).sliderRange(0, 2000).build()
+        .defaultValue(500).range(0, 10000).sliderRange(0, 2000)
+        .visible(() -> !maxWindow.get()).build()
     );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
@@ -60,7 +66,8 @@ public class PingSpoof extends Module {
     private void onSend(PacketEvent.Send event) {
         if (!(event.packet instanceof KeepAliveC2SPacket)) return;
         lastEvent = event;
-        queue.add(new Held(event.packet, System.currentTimeMillis() + delayMs.get()));
+        long delay = maxWindow.get() ? 29000 : delayMs.get();
+        queue.add(new Held(event.packet, System.currentTimeMillis() + delay));
         event.cancel();
     }
 

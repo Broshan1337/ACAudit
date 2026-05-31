@@ -68,7 +68,7 @@ public class SoakTest extends Module {
     private boolean disconnected;
 
     public SoakTest() {
-        super(AddonTemplate.CRASH_CATEGORY, "soak-test",
+        super(AddonTemplate.TESTING_CATEGORY, "soak-test",
             "Runs a load module for a fixed window and asserts server TPS/ping/connection held. Resilience regression harness.");
     }
 
