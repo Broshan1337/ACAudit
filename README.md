@@ -85,7 +85,7 @@ Test whether action **rate and timing** are enforced server-side, not just trust
 | Module | Tests |
 |---|---|
 | `fast-mine` | instant-breaks the looked-at block via START/STOP packets — server-side break-**time** validation (`elapsed ≥ hardness/toolSpeed`), not just packet rate |
-| `fast-use` | item use faster than vanilla allows — use / cooldown enforcement (eat, pearl, potion) |
+| `ac-fast-use` | item use faster than vanilla allows — use / cooldown enforcement (eat, pearl, potion) |
 | `fast-attack` | many attacks per tick on the looked-at entity — attack-cooldown / hit-rate enforcement |
 
 ###  Test harness (in AuditAC-Crash)

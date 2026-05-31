@@ -46,7 +46,7 @@ public class FastUse extends Module {
     );
 
     public FastUse() {
-        super(AddonTemplate.CRASH_CATEGORY, "fast-use",
+        super(AddonTemplate.CRASH_CATEGORY, "ac-fast-use",
             "Triggers item use faster than vanilla allows. Tests server-side use/cooldown enforcement (eat, pearl, potion).");
     }
 
