@@ -68,11 +68,25 @@ Tests inventory/container atomicity and economy-plugin input handling.
 | `econ-fuzz` | fuzzes an economy command with edge-case numbers (scientific notation, negatives, overflow, injection probes) — value parsing |
 | `sell-race` | same-tick command burst (TOCTOU) — atomicity of sell/payout vs. item removal |
 | `auction-race` | same-tick valid clicks on a GUI slot — concurrency handling of buy/claim/list buttons |
+| `gui-clicker` | hold a keybind to spam-click the slot **under your cursor** in any open GUI — plugin-GUI click concurrency |
+| `manual-click` | hand-crafts a `ClickSlotC2SPacket` (syncId / revision / slot / button / action) — bring-your-own-payload interaction tester |
+| `two-window-race` | clicks a container slot and a player-inventory slot in the same tick — cross-inventory locking in trade/sell GUIs |
+| `close-click` | sends a click and the window-close packet in the same tick — synchronous, atomic window teardown |
+| `slot-overlay` | renders each slot's network id on top of the open GUI — maps container / plugin layouts so you know which id to target |
 
 ###  AuditAC-Crash — malformed & high-volume stress tests
 Tests whether bad or excessive input produces a clean reject/flag instead of a thread hang or crash. **Run against your own local server only.**
 
 `payload-flood`, `nbt-bomb`, `nan-position`, `extreme-velocity`, `block-interaction-spam`, `arm-animation-flood`, `sell-command-fuzz`, `position-crash`, `book-crash`, `completion-crash`, `container-crash`, `creative-crash`, `entity-crash`, `error-crash`, `interact-crash`, `lectern-crash`, `message-lagger`, `movement-crash`, `packet-spammer`, `sequence-crash`, `window-crash`.
+
+#### Fast-action rate testers (in AuditAC-Crash)
+Test whether action **rate and timing** are enforced server-side, not just trusted from the client. The key insight: a packet-rate limiter catches the blunt version, but the real check is server-side **time/cooldown validation** — a single action that arrives faster than physics allows is still illegal.
+
+| Module | Tests |
+|---|---|
+| `fast-mine` | instant-breaks the looked-at block via START/STOP packets — server-side break-**time** validation (`elapsed ≥ hardness/toolSpeed`), not just packet rate |
+| `fast-use` | item use faster than vanilla allows — use / cooldown enforcement (eat, pearl, potion) |
+| `fast-attack` | many attacks per tick on the looked-at entity — attack-cooldown / hit-rate enforcement |
 
 ###  Test harness (in AuditAC-Crash)
 | Module | Purpose |
