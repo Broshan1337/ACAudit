@@ -31,7 +31,7 @@ Existing cheat clients (LiquidBounce, etc.) and crash addons aren't built for au
 
 ## Features
 
-Modules are organized into three category tabs plus a test harness.
+Modules are organized into four category tabs: Movement, Dupe, Crash, and Testing.
 
 ###  AuditAC-Movement — bypass & evasion vectors
 Tests whether your AC catches illegal movement and, crucially, whether a cheater can stop it from ever *seeing* the cheat.
@@ -55,6 +55,10 @@ Tests whether your AC catches illegal movement and, crucially, whether a cheater
 | `anti-setback` | rejects server position corrections — whether enforcement survives a non-cooperative client |
 | `ac-timer` | speeds the client tick clock (mixin) — wall-clock vs. per-tick rate limiting |
 | `ac-no-slow` | removes item-use slowdown (mixin) — server-side speed re-derivation from item-use state |
+| `vehicle-move` | flies/speeds the ridden vehicle via `VehicleMoveC2SPacket` — whether vehicle movement gets the same authority as player movement (boat-fly/boat-speed blind spot) |
+| `elytra-exploit` | overrides glide velocity to a fixed speed (firework-boost spoof) — server-side elytra speed envelope |
+| `riptide-launch` | imparts a riptide-magnitude impulse while dry — whether riptide velocity is gated on the water/rain precondition |
+| `phase` | walks reported position through blocks then snaps across — move-continuity / collision validation |
 
 ###  AuditAC-Dupe — duplication & economy probes
 Tests inventory/container atomicity and economy-plugin input handling.
@@ -73,11 +77,39 @@ Tests inventory/container atomicity and economy-plugin input handling.
 | `two-window-race` | clicks a container slot and a player-inventory slot in the same tick — cross-inventory locking in trade/sell GUIs |
 | `close-click` | sends a click and the window-close packet in the same tick — synchronous, atomic window teardown |
 | `slot-overlay` | renders each slot's network id on top of the open GUI — maps container / plugin layouts so you know which id to target |
+| `relog-dupe` | runs an action then force-disconnects N ticks later — save-on-quit ordering vs. in-flight transactions (the combat-log dupe) |
+| `enderchest-desync` | grabs ender-chest contents then force-disconnects — atomic+flushed profile save and session fencing |
+| `crafter-dupe` | floods Crafter (1.21) grid slot-toggle clicks while it crafts — craft-vs-toggle atomicity (run with a redstone clock) |
+| `craft-grid-race` | same-tick `QUICK_MOVE` burst on the crafting result slot — result-vs-grid-consumption atomicity |
+| `bundle-dupe` | stale-revision `PICKUP` burst on a bundle slot — bundle component/count reconciliation |
+| `portal-dupe` | fires an action on an interval and logs dimension changes — transaction handoff across dimension boundaries |
+| `anvil-grindstone-race` | same-tick `QUICK_MOVE` burst on the anvil/grindstone output slot — output-vs-input+XP atomicity |
+| `shift-click-race` | same-tick `QUICK_MOVE` burst across a slot range — `QUICK_MOVE` destination-search atomicity |
+| `drag-split-race` | starts a right-click drag then closes the container mid-drag — drag-state cleanup on window close |
+| `phantom-container` | closes a container then immediately clicks the same syncId — post-close click rejection |
+| `death-inventory-race` | floods inventory ops when health is critically low — death-processing vs. inventory-mutation atomicity |
+| `chest-shop-race` | spams shop block-use + container clicks simultaneously — shop buy-trigger vs. click atomicity |
+| `hopper-race` | floods clicks on hopper slots while the hopper transfer tick runs — hopper transfer vs. player-click mutex |
 
 ###  AuditAC-Crash — malformed & high-volume stress tests
 Tests whether bad or excessive input produces a clean reject/flag instead of a thread hang or crash. **Run against your own local server only.**
 
 `payload-flood`, `nbt-bomb`, `nan-position`, `extreme-velocity`, `block-interaction-spam`, `arm-animation-flood`, `sell-command-fuzz`, `position-crash`, `book-crash`, `completion-crash`, `container-crash`, `creative-crash`, `entity-crash`, `error-crash`, `interact-crash`, `lectern-crash`, `message-lagger`, `movement-crash`, `packet-spammer`, `sequence-crash`, `window-crash`.
+
+Newer additions:
+
+| Module | Tests |
+|---|---|
+| `snbt-depth` | sends commands with deeply-nested SNBT in a selector — command-parser recursion/size limits (distinct from `nbt-bomb`'s item NBT) |
+| `structure-string-flood` | floods structure/jigsaw/command-block packets with oversized string fields — string length validation on those less-trodden inputs |
+| `beacon-crash` | floods beacon-effect update packets with no beacon open — beacon update gating + rate limiting |
+| `passenger-loop` | spams mount interactions to provoke a passenger cycle (A rides B rides A) — passenger-chain cycle guard / traversal bounds |
+| `chunk-border-stress` | ping-pongs reported position across a chunk boundary rapidly — chunk-load / entity-tracking pipeline under crossing pressure |
+| `portal-spam` | spams portal block-use + position packets into the portal — portal transition pipeline under rapid re-initiation |
+| `entity-spam` | spams attack/interact + arm-swing packets on the crosshair entity — entity interaction rate-limiting and combat cooldown enforcement |
+| `mount-crash` | rapid mount/dismount packet spam — mount state-machine atomicity and transition rate limiting |
+| `channel-flood` | floods sprint-toggle / held-slot / offhand-swap metadata packets — per-type metadata rate limiting |
+| `packet-order-chaos` | sends packets in causally impossible sequences — server-side precondition validation and causal-order enforcement |
 
 #### Fast-action rate testers (in AuditAC-Crash)
 Test whether action **rate and timing** are enforced server-side, not just trusted from the client. The key insight: a packet-rate limiter catches the blunt version, but the real check is server-side **time/cooldown validation** — a single action that arrives faster than physics allows is still illegal.
@@ -88,13 +120,47 @@ Test whether action **rate and timing** are enforced server-side, not just trust
 | `ac-fast-use` | item use faster than vanilla allows — use / cooldown enforcement (eat, pearl, potion) |
 | `fast-attack` | many attacks per tick on the looked-at entity — attack-cooldown / hit-rate enforcement |
 
-###  Test harness (in AuditAC-Crash)
+### AuditAC-Testing — diagnostics, automated harness & experimental abuse
+Measurement and orchestration for resilience testing, plus the sneakier packet-timing vectors. **Run against your own local server only.**
+
+**Diagnostics & harness**
 | Module | Purpose |
 |---|---|
-| `server-health-monitor` | passively estimates server TPS (from time-update cadence) and ping — the measurement source |
-| `soak-test` | drives a chosen load module for a fixed window and reports **PASS/FAIL** against a TPS floor / ping ceiling / disconnect — resilience regression harness |
+| `server-probe` | live read-only readout: TPS · ping · setbacks/sec · in/out packets/sec · last kick reason — watch the server react in real time |
+| `server-health-monitor` | passive TPS (time-update cadence) + ping estimator — measurement source for the harness |
+| `soak-test` | drives one load module for a fixed window, reports **PASS/FAIL** vs. TPS floor / ping ceiling / disconnect |
+| `stress-runner` | runs each named load module in sequence, prints a per-vector **PASS/FAIL** table — automated resilience sweep |
+| `lag-profiler` | **ramps** one packet vector's rate and reports the rate that first drops TPS below the floor — finds the breaking point |
+
+**Experimental packet abuse**
+| Module | Tests |
+|---|---|
+| `typed-blink` | holds one packet category (movement/container/combat) while sending the rest — the **lagback** exploit; position-authority for combat |
+| `packet-reorder` | buffers movement/action packets and releases them reversed or shuffled — causal-order validation |
+| `confirm-desync` | withholds teleport-confirm packets — how the server handles an unacknowledged setback |
+| `metadata-flood` | floods legal metadata packets (sprint-toggle / held-slot / client-options) that are cheap to send but force **O(viewers) rebroadcast** — CPU exhaustion + Netty backpressure |
+
+(`ping-spoof` in AuditAC-Movement also has a **`max-window`** mode — keepalive starvation that holds responses ~29s, just under the timeout, for the maximum lag window.)
+
+**New monitoring modules**
+| Module | Purpose |
+|---|---|
+| `check-rate-monitor` | counts setback packets/s split by moving vs. still — fingerprints the AC's check cadence |
+| `correction-timing-monitor` | measures RTT from sending movement to receiving a correction — AC response latency in ms and ticks |
+| `packet-cadence-monitor` | counts S2C packets by type and reports top-N/s — establishes baseline server traffic patterns |
+| `combat-pattern-monitor` | logs CPS, swing-to-attack ratio, multi-attack ticks — combat baseline for AC calibration |
+| `command-rate-limit-probe` | sends command variants (normal / namespaced / mixed-case / aliased) and watches for rate-limit responses |
+
+**New automation modules**
+| Module | Purpose |
+|---|---|
+| `auto-audit-runner` | sequential module sweep with per-vector PASS/FAIL; saves timestamped report to `config/acaudit/reports/` |
+| `combo-test` | activates two named modules simultaneously and reports combined TPS impact — compound-vector stress |
+| `vector-matrix` | runs the full crash vector list in sequence and saves a PASS/FAIL matrix to `config/acaudit/reports/` |
 
 Most modules include an **`auto-disable`** option (on by default) that switches the module off when you are kicked or disconnect, so a failed test doesn't keep firing on reconnect.
+
+All modules now include a **`show-stats`** checkbox (on by default). When the module is deactivated, it prints how many ticks it was active and how many packets it sent — useful for confirming the module actually fired and quantifying the load applied.
 
 ---
 
