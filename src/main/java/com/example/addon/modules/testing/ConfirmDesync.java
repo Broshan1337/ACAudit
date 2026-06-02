@@ -55,7 +55,7 @@ public class ConfirmDesync extends Module {
     }
 
     @Override
-    public void onActivate() { withheld = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; withheld = 0; }
 
     @EventHandler
     private void onSend(PacketEvent.Send event) {

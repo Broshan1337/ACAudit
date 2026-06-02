@@ -117,7 +117,7 @@ public class CommandRateLimitProbe extends Module {
     }
 
     @Override
-    public void onActivate() {
+    public void onActivate() { ticksActive = 0; packetsSent = 0;
         String cmd = command.get();
         String plug = pluginPrefix.get().trim();
 

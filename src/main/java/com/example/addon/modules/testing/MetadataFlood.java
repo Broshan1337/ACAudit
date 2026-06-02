@@ -69,7 +69,7 @@ public class MetadataFlood extends Module {
     }
 
     @Override
-    public void onActivate() { sprintState = false; slot = 0; rotate = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; sprintState = false; slot = 0; rotate = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {

@@ -73,7 +73,7 @@ public class TypedBlink extends Module {
     }
 
     @Override
-    public void onActivate() { queue.clear(); held = 0; wasPressed = false; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; queue.clear(); held = 0; wasPressed = false; }
 
     @Override
     public void onDeactivate() {

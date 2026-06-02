@@ -60,7 +60,7 @@ public class PacketReorder extends Module {
     }
 
     @Override
-    public void onActivate() { buffer.clear(); held = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; buffer.clear(); held = 0; }
 
     @Override
     public void onDeactivate() {

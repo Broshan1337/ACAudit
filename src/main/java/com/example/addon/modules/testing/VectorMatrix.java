@@ -32,8 +32,9 @@ import java.util.List;
 public class VectorMatrix extends Module {
     private enum Phase { RUN, GAP, DONE }
 
-    // Full default list of all crash vectors in the addon
+    // Full default list — crash vectors first, then dupe vectors
     private static final String DEFAULT_TARGETS =
+        // Crash / stability
         "payload-flood,nbt-bomb,nan-position,extreme-velocity," +
         "block-interaction-spam,arm-animation-flood,sell-command-fuzz," +
         "position-crash,book-crash,completion-crash,container-crash," +
@@ -42,13 +43,19 @@ public class VectorMatrix extends Module {
         "sequence-crash,window-crash,fast-mine,fast-attack,ac-fast-use," +
         "chunk-border-stress,portal-spam,entity-spam,mount-crash," +
         "channel-flood,packet-order-chaos,snbt-depth,structure-string-flood," +
-        "beacon-crash,passenger-loop";
+        "beacon-crash,passenger-loop," +
+        // Dupe / inventory
+        "slot-exploit,interaction-flood,drop-pickup-dupe,container-exploit," +
+        "sell-race,auction-race,shulker-race,close-click,two-window-race," +
+        "offhand-swap-spam,shift-click-race,drag-split-race,phantom-container," +
+        "hopper-race,crafter-dupe,craft-grid-race,anvil-grindstone-race," +
+        "bundle-dupe,death-inventory-race";
 
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
     private final Setting<String> targets = sgGeneral.add(new StringSetting.Builder()
         .name("targets")
-        .description("Comma-separated module names. Leave default for the full crash matrix.")
+        .description("Comma-separated module names. Leave default for the full crash + dupe matrix.")
         .defaultValue(DEFAULT_TARGETS).build()
     );
     private final Setting<Integer> perTest = sgGeneral.add(new IntSetting.Builder()
@@ -72,7 +79,7 @@ public class VectorMatrix extends Module {
 
     public VectorMatrix() {
         super(AddonTemplate.TESTING_CATEGORY, "vector-matrix",
-            "Runs the full crash vector list in sequence and saves a PASS/FAIL matrix to config/acaudit/reports/.");
+            "Runs the full crash + dupe vector list in sequence and saves a PASS/FAIL matrix to config/acaudit/reports/.");
     }
 
     @Override
@@ -149,7 +156,7 @@ public class VectorMatrix extends Module {
     private void finish() {
         phase = Phase.DONE;
         report.add("---");
-        long pass = report.stream().filter(l -> l.endsWith("PASS")).count();
+        long pass = report.stream().filter(l -> l.contains("PASS")).count();
         long fail = report.stream().filter(l -> l.contains("FAIL")).count();
         long skip = report.stream().filter(l -> l.endsWith("SKIP")).count();
         report.add(String.format("PASS: %d  FAIL: %d  SKIP: %d  TOTAL: %d", pass, fail, skip, names.size()));
