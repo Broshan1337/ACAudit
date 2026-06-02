@@ -63,7 +63,10 @@ public class EnderChestDesync extends Module {
     }
 
     @Override
-    public void onActivate() { wasPressed = false; countdown = -1; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; wasPressed = false; countdown = -1;
+        info("Tip: combine with shulker-race if items are in shulkers inside the ender chest.");
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {

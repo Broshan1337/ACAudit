@@ -75,7 +75,7 @@ public class FastMine extends Module {
     }
 
     @Override
-    public void onActivate() { timer = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; timer = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {

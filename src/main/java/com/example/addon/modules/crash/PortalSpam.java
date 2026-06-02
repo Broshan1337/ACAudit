@@ -5,6 +5,7 @@ import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -49,6 +50,11 @@ public class PortalSpam extends Module {
         .name("show-stats").description("Print tick + packet count on deactivate.")
         .defaultValue(true).build()
     );
+    private final Setting<Boolean> autoMonitor = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-monitor")
+        .description("Auto-enable Server Health Monitor to track TPS impact while this module runs.")
+        .defaultValue(true).build()
+    );
 
     private int ticksActive = 0, packetsSent = 0;
 
@@ -60,7 +66,13 @@ public class PortalSpam extends Module {
     }
 
     @Override
-    public void onActivate() { seq = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; seq = 0;
+        if (autoMonitor.get()) {
+            var shm = Modules.get().get(ServerHealthMonitor.class);
+            if (shm != null && !shm.isActive()) shm.toggle();
+        }
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {

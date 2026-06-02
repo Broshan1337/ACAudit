@@ -2,6 +2,7 @@ package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -10,6 +11,8 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
@@ -47,6 +50,9 @@ public class OffhandSwapSpam extends Module {
             "Spams offhand swaps (no GUI needed). Tests rate-limiting and atomicity of the offhand item-movement path.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
@@ -61,6 +67,14 @@ public class OffhandSwapSpam extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
+            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
+        else if (event.packet instanceof InventoryS2CPacket p)
+            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
     }
 
     @EventHandler

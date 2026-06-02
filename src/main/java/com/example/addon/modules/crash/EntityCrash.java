@@ -74,6 +74,9 @@ public class EntityCrash extends Module {
             "Spams vehicle move/paddle packets while riding an entity. Tests vehicle position validation.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
@@ -85,6 +88,7 @@ public class EntityCrash extends Module {
             return;
         }
 
+        int count = amount.get();
         switch (mode.get()) {
             case Boat -> {
                 if (!(vehicle instanceof AbstractBoatEntity)) {
@@ -92,25 +96,28 @@ public class EntityCrash extends Module {
                     toggle();
                     return;
                 }
-                for (int i = 0; i < amount.get(); i++)
+                for (int i = 0; i < count; i++) {
                     mc.player.networkHandler.sendPacket(new BoatPaddleStateC2SPacket(true, true));
-            packetsSent++;
+                    packetsSent++;
+                }
             }
             case Movement -> {
-                for (int i = 0; i < amount.get(); i++) {
+                double step = speed.get();
+                for (int i = 0; i < count; i++) {
                     Vec3d v = vehicle.getEntityPos();
-                    vehicle.setPosition(v.x, v.y + speed.get(), v.z);
+                    vehicle.setPosition(v.x, v.y + step, v.z);
                     mc.player.networkHandler.sendPacket(VehicleMoveC2SPacket.fromVehicle(vehicle));
-            packetsSent++;
+                    packetsSent++;
                 }
             }
             case Position -> {
                 BlockPos start = mc.player.getBlockPos();
                 Vec3d end = new Vec3d(start.getX() + .5, start.getY() + 1, start.getZ() + .5);
                 vehicle.updatePosition(end.x, end.y - 1, end.z);
-                for (int i = 0; i < amount.get(); i++)
+                for (int i = 0; i < count; i++) {
                     mc.player.networkHandler.sendPacket(VehicleMoveC2SPacket.fromVehicle(vehicle));
-            packetsSent++;
+                    packetsSent++;
+                }
             }
         }
     }

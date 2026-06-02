@@ -67,6 +67,9 @@ public class CreativeCrash extends Module {
             "Sends creative-set-slot packets with a block-entity-data payload spawning fireballs. Requires creative mode.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;

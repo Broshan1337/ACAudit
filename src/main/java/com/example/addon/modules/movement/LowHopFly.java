@@ -3,10 +3,7 @@ package com.example.addon.modules.movement;
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.DoubleSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -21,6 +18,14 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
  * unchanged — defeating ACs that flag only large Y deltas or onGround=false
  * while flying.
  *
+ * Subtlety controls:
+ *   surface-noise  — ±random variation on the hover Y each tick. Tests whether
+ *                    the AC catches "perfectly still Y" vs. "Y fluctuating within
+ *                    normal range".
+ *   skip-unchanged — suppress the position packet when X/Z haven't changed.
+ *                    Mimics a stationary real player and probes whether the AC
+ *                    flags packet presence or packet content.
+ *
  * DETECTION: onGround=true is only valid when there is a solid support block
  * at or immediately below the reported Y. The server must raycast the block
  * column below the claimed position; an onGround claim with no solid block
@@ -34,6 +39,16 @@ public class LowHopFly extends Module {
         .name("hover-height").description("Blocks above ground to hover at.")
         .defaultValue(0.42).range(0.1, 2.0).sliderRange(0.1, 1.0).build()
     );
+    private final Setting<Double> surfaceNoise = sgGeneral.add(new DoubleSetting.Builder()
+        .name("surface-noise")
+        .description("Random ±Y variation per tick. Tests variance-based vs. zero-motion detection.")
+        .defaultValue(0.002).range(0.0, 0.01).sliderRange(0.0, 0.008).build()
+    );
+    private final Setting<Boolean> skipUnchanged = sgGeneral.add(new BoolSetting.Builder()
+        .name("skip-unchanged")
+        .description("Skip position packet when X/Z hasn't changed since last tick. Mimics stationary player.")
+        .defaultValue(false).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -44,8 +59,8 @@ public class LowHopFly extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
-
     private double targetY = -1;
+    private double lastX = Double.NaN, lastZ = Double.NaN;
 
     public LowHopFly() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "low-hop-fly",
@@ -54,7 +69,9 @@ public class LowHopFly extends Module {
 
     @Override
     public void onActivate() {
+        ticksActive = 0; packetsSent = 0;
         if (mc.player != null) targetY = mc.player.getY() + hoverHeight.get();
+        lastX = Double.NaN; lastZ = Double.NaN;
     }
 
     @EventHandler
@@ -62,10 +79,18 @@ public class LowHopFly extends Module {
         if (mc.player == null || mc.world == null) return;
         ticksActive++;
         mc.player.setVelocity(mc.player.getVelocity().x, 0.0, mc.player.getVelocity().z);
-        mc.player.setPosition(mc.player.getX(), targetY, mc.player.getZ());
+
+        double noise = surfaceNoise.get();
+        double sendY = targetY + (noise > 0 ? (Math.random() * 2 - 1) * noise : 0);
+        double cx = mc.player.getX(), cz = mc.player.getZ();
+        mc.player.setPosition(cx, sendY, cz);
+
+        if (skipUnchanged.get() && !Double.isNaN(lastX) && cx == lastX && cz == lastZ) return;
+
         mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-            mc.player.getX(), targetY, mc.player.getZ(), true, mc.player.horizontalCollision));
-            packetsSent++;
+            cx, sendY, cz, true, mc.player.horizontalCollision));
+        packetsSent++;
+        lastX = cx; lastZ = cz;
     }
 
     @Override

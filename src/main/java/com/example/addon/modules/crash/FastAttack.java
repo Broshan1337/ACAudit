@@ -59,6 +59,9 @@ public class FastAttack extends Module {
             "Attacks the looked-at entity many times per tick. Tests server-side attack-cooldown / hit-rate enforcement.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;

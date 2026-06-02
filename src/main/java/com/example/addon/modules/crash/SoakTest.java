@@ -163,7 +163,9 @@ public class SoakTest extends Module {
         if (phase == Phase.LOAD) {
             disconnected = true;
             warning("Disconnected during load phase - automatic FAIL for '%s'.", targetModule.get());
+            finish();  // prints the FAIL report before the module deactivates
+        } else if (isActive()) {
+            toggle();
         }
-        if (isActive()) toggle();
     }
 }

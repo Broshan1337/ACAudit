@@ -3,12 +3,15 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 
@@ -74,7 +77,7 @@ public class BundleDupe extends Module {
     }
 
     @Override
-    public void onActivate() { wasPressed = false; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -101,6 +104,14 @@ public class BundleDupe extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
+            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
+        else if (event.packet instanceof InventoryS2CPacket p)
+            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
     }
 
     @EventHandler

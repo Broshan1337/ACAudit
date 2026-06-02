@@ -2,7 +2,9 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.OpenScreenEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screen.ingame.LecternScreen;
@@ -20,8 +22,8 @@ import net.minecraft.screen.sync.ItemStackHash;
  * without checking the handler type may throw a NullPointerException or an
  * ArrayIndexOutOfBoundsException when it tries to find a destination slot.
  *
- * This is a one-shot module — it fires a single packet on screen open, then
- * self-disables.
+ * After firing, the module waits 2 seconds (40 ticks) for a kick before
+ * self-disabling, so a server-side kick is observable in the stats.
  *
  * Patch signal: the lectern click handler must only accept PICKUP (take book)
  * clicks on slot 0 and reject all other action types (QUICK_MOVE, THROW,
@@ -31,9 +33,20 @@ import net.minecraft.screen.sync.ItemStackHash;
  * Open a lectern, enable, then interact with the lectern.
  */
 public class LecternCrash extends Module {
+    private boolean fired = false;
+    private boolean kicked = false;
+    private int waitTicks = 0;
+
     public LecternCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "lectern-crash",
             "Sends a QUICK_MOVE click on a lectern's virtual slot when it opens. Tests lectern slot handling.");
+    }
+
+    @Override
+    public void onActivate() {
+        fired = false;
+        kicked = false;
+        waitTicks = 0;
     }
 
     @EventHandler
@@ -44,6 +57,24 @@ public class LecternCrash extends Module {
             mc.player.currentScreenHandler.syncId, mc.player.currentScreenHandler.getRevision(),
             (short) 0, (byte) 0, SlotActionType.QUICK_MOVE,
             new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
-        toggle();
+        fired = true;
+        waitTicks = 40;
+    }
+
+    @EventHandler
+    private void onTick(TickEvent.Pre event) {
+        if (!fired) return;
+        waitTicks--;
+        if (waitTicks <= 0) {
+            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+            toggle();
+        }
+    }
+
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        kicked = true;
+        info("  Server kicked: YES — rejection detected");
+        if (isActive()) toggle();
     }
 }

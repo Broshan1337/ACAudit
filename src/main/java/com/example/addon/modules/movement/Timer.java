@@ -3,10 +3,7 @@ package com.example.addon.modules.movement;
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.DoubleSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 
@@ -15,24 +12,41 @@ import meteordevelopment.orbit.EventHandler;
  *
  * Scales the client game-tick clock. A multiplier > 1 makes the client process
  * more game ticks per real second, so movement/actions are sent faster than
- * wall-clock allows - effectively speed and faster everything, while each
+ * wall-clock allows — effectively speed and faster-everything, while each
  * individual packet still looks per-tick legal.
  *
- * The actual tick scaling is applied in TimerMixin (RenderTickCounter.Dynamic);
- * this module just exposes the multiplier and on/off state to it.
+ * Subtlety control:
+ *   burst-mode — alternate between burst-ticks at full multiplier and rest-ticks
+ *                at normal speed (1.0×). Tests whether the AC catches intermittent
+ *                timer abuse or only sustained clock inflation. A real laggy client
+ *                bursts ticks similarly; this probes whether the AC can distinguish
+ *                the two.
  *
  * DETECTION: rate-limit by WALL-CLOCK, not tick count. A client cannot legibly
  * send more than ~20 movement packets per real second; count moves over a
- * 1-second sliding window and flag any sustained excess regardless of how
- * "legal" each individual packet is.
+ * 1-second sliding window and flag any sustained excess.
  */
 public class Timer extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
     private final Setting<Double> multiplier = sgGeneral.add(new DoubleSetting.Builder()
-        .name("multiplier")
-        .description("Tick-speed multiplier (1.0 = vanilla, >1 = faster).")
+        .name("multiplier").description("Tick-speed multiplier (1.0 = vanilla, >1 = faster).")
         .defaultValue(2.0).range(0.1, 10.0).sliderRange(0.1, 5.0).build()
+    );
+    private final Setting<Boolean> burstMode = sgGeneral.add(new BoolSetting.Builder()
+        .name("burst-mode")
+        .description("Alternate between full multiplier and 1.0×. Tests intermittent timer detection.")
+        .defaultValue(false).build()
+    );
+    private final Setting<Integer> burstTicks = sgGeneral.add(new IntSetting.Builder()
+        .name("burst-ticks").description("Ticks at full multiplier per cycle.")
+        .defaultValue(20).range(1, 200).sliderRange(1, 80)
+        .visible(burstMode::get).build()
+    );
+    private final Setting<Integer> restTicks = sgGeneral.add(new IntSetting.Builder()
+        .name("rest-ticks").description("Ticks at 1.0× per cycle.")
+        .defaultValue(40).range(1, 200).sliderRange(1, 80)
+        .visible(burstMode::get).build()
     );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
@@ -52,13 +66,23 @@ public class Timer extends Module {
 
     /** Read by TimerMixin. Returns 1.0 when inactive so the mixin is a no-op. */
     public float getMultiplier() {
-        return isActive() ? multiplier.get().floatValue() : 1.0f;
+        if (!isActive()) return 1.0f;
+        if (burstMode.get()) {
+            int bt = burstTicks.get(), rt = restTicks.get();
+            int cycle = bt + rt;
+            boolean inBurst = cycle > 0 && (ticksActive % cycle) < bt;
+            return inBurst ? multiplier.get().floatValue() : 1.0f;
+        }
+        return multiplier.get().floatValue();
     }
 
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
     }
+
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) { ticksActive++; }

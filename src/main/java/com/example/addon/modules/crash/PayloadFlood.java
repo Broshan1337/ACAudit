@@ -74,7 +74,7 @@ public class PayloadFlood extends Module {
     }
 
     @Override
-    public void onActivate() { bookTurn = true; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; bookTurn = true; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {

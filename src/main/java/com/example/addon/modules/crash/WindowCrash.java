@@ -54,11 +54,15 @@ public class WindowCrash extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private boolean kicked = false;
 
     public WindowCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "window-crash",
             "Sends SWAP click-slot packets with an out-of-range slot. Targets Paper 1.20.1-era window handling.");
     }
+
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; kicked = false; }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
@@ -76,11 +80,15 @@ public class WindowCrash extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+        }
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        kicked = true;
         if (autoDisable.get() && isActive()) toggle();
     }
 }

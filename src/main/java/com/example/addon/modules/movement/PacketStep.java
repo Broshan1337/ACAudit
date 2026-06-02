@@ -3,11 +3,7 @@ package com.example.addon.modules.movement;
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.DoubleSetting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -21,10 +17,11 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
  * can the server distinguish a legitimate step-up (follows a plausible jump
  * arc from the ground) from a raw vertical teleport (Y jumps discontinuously)?
  *
- * Vanilla step height is 0.6 blocks; sending 1.0+ blocks without the arc
- * packets that precede and follow a jump is the packet-step cheat. An AC
- * that only checks the final Y delta and not the sequence of intermediate
- * positions will miss it.
+ * Subtlety controls:
+ *   arc-noise      — ±random variation on each Y step. Tests whether the AC
+ *                    catches fixed-interval steps or also catches randomised
+ *                    discontinuous Y jumps.
+ *   cooldown-ticks — minimum ticks between firing. Tests rapid-step detection.
  *
  * DETECTION: validate that each new Y value is reachable from the previous
  * one via the player's current vertical velocity and gravity; a jump from
@@ -42,6 +39,15 @@ public class PacketStep extends Module {
         .name("packets").description("Position packets to send per key press.")
         .defaultValue(3).range(1, 20).sliderRange(1, 10).build()
     );
+    private final Setting<Double> arcNoise = sgGeneral.add(new DoubleSetting.Builder()
+        .name("arc-noise")
+        .description("Random ±variation on each step Y. Tests fixed-interval vs. randomised step detection.")
+        .defaultValue(0.005).range(0.0, 0.02).sliderRange(0.0, 0.015).build()
+    );
+    private final Setting<Integer> cooldownTicks = sgGeneral.add(new IntSetting.Builder()
+        .name("cooldown-ticks").description("Minimum ticks between step attempts.")
+        .defaultValue(3).range(0, 10).sliderRange(0, 8).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -52,24 +58,44 @@ public class PacketStep extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private boolean wasPressed = false;
+    private int cooldown = 0;
 
     public PacketStep() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "packet-step",
             "Spoofs Y position upward without a jump arc. Tests path-continuity validation.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; cooldown = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         ticksActive++;
-        if (!mc.options.jumpKey.isPressed()) return;
+
+        if (cooldown > 0) { cooldown--; }
+
+        boolean pressed = mc.options.jumpKey.isPressed();
+        boolean fire = pressed && !wasPressed;
+        wasPressed = pressed;
+
+        if (!fire || cooldown > 0) return;
+
         double y = mc.player.getY();
-        for (int i = 0; i < packets.get(); i++) {
-            y += stepHeight.get();
+        double noise = arcNoise.get();
+        int count = packets.get();
+
+        for (int i = 0; i < count; i++) {
+            double jit = noise > 0 ? (Math.random() * 2 - 1) * noise : 0;
+            y += stepHeight.get() + jit;
+            boolean last = (i == count - 1);
             mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
-                mc.player.getX(), y, mc.player.getZ(), true, false));
+                mc.player.getX(), y, mc.player.getZ(), last, false));
             packetsSent++;
         }
+
+        cooldown = cooldownTicks.get();
     }
 
     @Override

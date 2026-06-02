@@ -55,6 +55,7 @@ public class ExtremeVelocity extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private boolean kicked = false;
 
     private double accumX = 0;
 
@@ -64,7 +65,7 @@ public class ExtremeVelocity extends Module {
     }
 
     @Override
-    public void onActivate() {
+    public void onActivate() { ticksActive = 0; packetsSent = 0; kicked = false;
         if (mc.player != null) accumX = mc.player.getX();
     }
 
@@ -84,11 +85,15 @@ public class ExtremeVelocity extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+        }
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        kicked = true;
         if (autoDisable.get() && isActive()) toggle();
     }
 }

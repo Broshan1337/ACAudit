@@ -3,11 +3,14 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 
@@ -46,6 +49,10 @@ public class ShiftClickRace extends Module {
         .name("burst-per-slot").description("QUICK_MOVE copies per slot per fire.")
         .defaultValue(3).range(1, 50).sliderRange(1, 20).build()
     );
+    private final Setting<Boolean> staleRevision = sgGeneral.add(new BoolSetting.Builder()
+        .name("stale-revision").description("Send revision=0 instead of the current one.")
+        .defaultValue(false).build()
+    );
     private final Setting<Trigger> trigger = sgGeneral.add(new EnumSetting.Builder<Trigger>()
         .name("trigger").defaultValue(Trigger.EACH_TICK).build()
     );
@@ -73,7 +80,7 @@ public class ShiftClickRace extends Module {
     }
 
     @Override
-    public void onActivate() { wasPressed = false; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -87,7 +94,7 @@ public class ShiftClickRace extends Module {
 
         var handler = mc.player.currentScreenHandler;
         int syncId = handler.syncId;
-        int rev = handler.getRevision();
+        int rev = staleRevision.get() ? 0 : handler.getRevision();
         int end = Math.min(endSlot.get(), handler.slots.size() - 1);
 
         for (int slot = startSlot.get(); slot <= end; slot++) {
@@ -103,6 +110,14 @@ public class ShiftClickRace extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
+            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
+        else if (event.packet instanceof InventoryS2CPacket p)
+            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
     }
 
     @EventHandler

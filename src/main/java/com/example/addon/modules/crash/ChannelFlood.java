@@ -64,7 +64,7 @@ public class ChannelFlood extends Module {
     }
 
     @Override
-    public void onActivate() { sprintState = false; slotIdx = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; sprintState = false; slotIdx = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {

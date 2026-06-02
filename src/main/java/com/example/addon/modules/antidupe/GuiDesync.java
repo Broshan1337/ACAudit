@@ -11,6 +11,8 @@ import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.screen.slot.SlotActionType;
@@ -81,7 +83,10 @@ public class GuiDesync extends Module {
     }
 
     @Override
-    public void onActivate() { queue.clear(); held = 0; wasPressed = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; queue.clear(); held = 0; wasPressed = false;
+        info("Tip: combine with relog-dupe — hold packets and force-disconnect to test save-on-quit race.");
+    }
 
     @Override
     public void onDeactivate() {
@@ -139,6 +144,14 @@ public class GuiDesync extends Module {
         }
         queue.clear();
         held = 0;
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
+            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
+        else if (event.packet instanceof InventoryS2CPacket p)
+            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
     }
 
     @EventHandler

@@ -3,6 +3,7 @@ package com.example.addon.modules.movement;
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
@@ -15,19 +16,27 @@ import java.util.List;
 /**
  * AUDIT: Blink (lag switch)
  *
- * The keystone evasion technique. Holds your outbound packets in a queue
- * instead of sending them, then flushes them all at once. During the hold
- * window the server still sees you at your last reported position, so anything
- * you do client-side (fly, run, teleport) is invisible until the flush - at
- * which point you "rubber-band" to your real position in one burst.
+ * Holds outbound packets in a queue and flushes them all at once. During the
+ * hold window the server still sees you at your last reported position, so
+ * anything done client-side is invisible until the flush.
  *
  * If your AC can be blinked, every other cheat becomes invisible: the AC never
  * sees the illegal motion live, only a player who goes silent and then snaps.
  *
- * DETECTION: validate packet CADENCE, not per-packet legality. A legitimate
- * client sends ~20 movement packets/sec. Flag a player who sends no movement
- * for many ticks and then delivers a burst of queued moves / a large position
- * jump on resume. Setback-on-resume is not enough - detect the silence itself.
+ * Subtlety controls:
+ *   jitter-ticks       — randomises the flush point by ±N ticks so the silence
+ *                        window isn't perfectly periodic (tests cadence-pattern
+ *                        detection vs. cadence-presence detection).
+ *   flush-spread-ticks — spread the flushed packets across N ticks instead of
+ *                        sending them all in one burst, simulating a more
+ *                        realistic network recovery.
+ *
+ * Combination: Blink+AntiSetback is the canonical full evasion combo — go
+ * silent, do illegal movement, flush, drop the resulting correction. Also pair
+ * with StealthFly JITTER: fly during silence, flush movement burst.
+ *
+ * DETECTION: validate packet CADENCE. A legitimate client sends ~20 movement
+ * packets/sec. Flag a player who goes silent then delivers a position burst.
  */
 public class Blink extends Module {
     public enum Filter { MOVEMENT_ONLY, ALL }
@@ -40,15 +49,24 @@ public class Blink extends Module {
         .defaultValue(Filter.MOVEMENT_ONLY).build()
     );
     private final Setting<Boolean> autoFlush = sgGeneral.add(new BoolSetting.Builder()
-        .name("auto-flush")
-        .description("Automatically release the queue after max-hold ticks.")
+        .name("auto-flush").description("Automatically release the queue after max-hold ticks.")
         .defaultValue(true).build()
     );
     private final Setting<Integer> maxHold = sgGeneral.add(new IntSetting.Builder()
-        .name("max-hold-ticks")
-        .description("Ticks to hold before auto-flushing (20 = 1s).")
+        .name("max-hold-ticks").description("Base ticks to hold before auto-flushing (20 = 1s).")
         .defaultValue(40).range(1, 600).sliderRange(10, 200)
         .visible(autoFlush::get).build()
+    );
+    private final Setting<Integer> jitterTicks = sgGeneral.add(new IntSetting.Builder()
+        .name("jitter-ticks")
+        .description("Random ±ticks added to max-hold-ticks each cycle. Tests cadence-pattern vs. cadence-presence detection.")
+        .defaultValue(0).range(0, 40).sliderRange(0, 20)
+        .visible(autoFlush::get).build()
+    );
+    private final Setting<Integer> flushSpreadTicks = sgGeneral.add(new IntSetting.Builder()
+        .name("flush-spread-ticks")
+        .description("Spread flushed packets across this many ticks (0 = instant burst). Simulates realistic network recovery.")
+        .defaultValue(0).range(0, 10).sliderRange(0, 5).build()
     );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable (and flush) when kicked from the server.")
@@ -62,8 +80,11 @@ public class Blink extends Module {
     private int ticksActive = 0, packetsSent = 0;
 
     private final List<Packet<?>> queue = new ArrayList<>();
+    private final List<Packet<?>> flushQueue = new ArrayList<>();
     private int heldTicks = 0;
-    private meteordevelopment.meteorclient.events.packets.PacketEvent.Send lastEvent;
+    private int targetHold = 0;
+    private int flushPerTick = Integer.MAX_VALUE;
+    private PacketEvent.Send lastEvent;
 
     public Blink() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "ac-blink",
@@ -71,37 +92,72 @@ public class Blink extends Module {
     }
 
     @Override
-    public void onActivate() { queue.clear(); heldTicks = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0;
+        queue.clear(); flushQueue.clear();
+        heldTicks = 0;
+        targetHold = computeTarget();
+    }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent); flush(); }
+        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        flush();
+    }
+
+    @EventHandler
+    private void onTick(TickEvent.Pre event) {
+        ticksActive++;
+
+        // Drain spread flush queue
+        if (!flushQueue.isEmpty()) {
+            int toSend = flushPerTick == Integer.MAX_VALUE ? flushQueue.size() : Math.min(flushPerTick, flushQueue.size());
+            for (int i = 0; i < toSend && !flushQueue.isEmpty(); i++) {
+                sendPacket(flushQueue.remove(0));
+            }
+        }
+    }
 
     @EventHandler
     private void onSend(PacketEvent.Send event) {
-        ticksActive++;
         boolean hold = filter.get() == Filter.ALL || event.packet instanceof PlayerMoveC2SPacket;
         if (!hold) return;
 
         queue.add(event.packet);
-        lastEvent = event;          // keep a handle to sendSilently through
+        lastEvent = event;
         event.cancel();
 
         heldTicks++;
-        if (autoFlush.get() && heldTicks >= maxHold.get()) flush();
+        if (autoFlush.get() && heldTicks >= targetHold) flush();
     }
 
     private void flush() {
         if (queue.isEmpty()) return;
-        info("Flushing %d held packets", queue.size());
-        if (lastEvent != null) {
-            for (Packet<?> p : queue) { lastEvent.sendSilently(p); packetsSent++; }
-        } else if (mc.player != null) {
-            var conn = mc.player.networkHandler.getConnection();
-            for (Packet<?> p : queue) { conn.send(p); packetsSent++; }
+        info("Flushing %d held packets%s", queue.size(),
+            flushSpreadTicks.get() > 0 ? " over " + flushSpreadTicks.get() + " ticks" : "");
+
+        int spread = flushSpreadTicks.get();
+        if (spread == 0) {
+            for (Packet<?> p : queue) sendPacket(p);
+        } else {
+            flushQueue.addAll(queue);
+            // packets per tick = queue size / spread ticks, minimum 1
+            flushPerTick = Math.max(1, (int) Math.ceil((double) queue.size() / spread));
         }
         queue.clear();
         heldTicks = 0;
+        targetHold = computeTarget();
+    }
+
+    private void sendPacket(Packet<?> p) {
+        if (lastEvent != null) { lastEvent.sendSilently(p); packetsSent++; }
+        else if (mc.player != null) { mc.player.networkHandler.getConnection().send(p); packetsSent++; }
+    }
+
+    private int computeTarget() {
+        int base = maxHold.get();
+        int j = jitterTicks.get();
+        return j > 0 ? Math.max(1, base + (int) ((Math.random() * 2 - 1) * j)) : base;
     }
 
     @EventHandler

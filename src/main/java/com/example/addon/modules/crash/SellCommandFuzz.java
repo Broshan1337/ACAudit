@@ -7,8 +7,10 @@ import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 
 /**
  * AUDIT: Sell Command Fuzz (focused economy quantity edge cases)
@@ -59,6 +61,7 @@ public class SellCommandFuzz extends Module {
 
     private int index = 0;
     private int timer = 0;
+    private String lastFuzzValue = null;
 
     public SellCommandFuzz() {
         super(AddonTemplate.CRASH_CATEGORY, "sell-command-fuzz",
@@ -66,7 +69,7 @@ public class SellCommandFuzz extends Module {
     }
 
     @Override
-    public void onActivate() {
+    public void onActivate() { ticksActive = 0; packetsSent = 0;
         index = 0;
         timer = 0;
     }
@@ -76,7 +79,8 @@ public class SellCommandFuzz extends Module {
         if (mc.player == null) return;
         ticksActive++;
         if (timer > 0) { timer--; return; }
-        mc.player.networkHandler.sendChatCommand("sell " + FUZZ_VALUES[index % FUZZ_VALUES.length]);
+        lastFuzzValue = FUZZ_VALUES[index % FUZZ_VALUES.length];
+        mc.player.networkHandler.sendChatCommand("sell " + lastFuzzValue);
         packetsSent++;
 
         index++;
@@ -87,6 +91,13 @@ public class SellCommandFuzz extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
+        String text = msg.content().getString();
+        if (!text.isBlank()) info("[Response to '%s'] %s", lastFuzzValue, text);
     }
 
     @EventHandler

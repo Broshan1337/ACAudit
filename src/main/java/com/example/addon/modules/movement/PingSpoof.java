@@ -4,10 +4,7 @@ import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.Packet;
@@ -24,6 +21,14 @@ import java.util.Deque;
  * (knockback, hit reach, movement tolerance) widen for "laggy" clients, so a
  * cheater manufactures lag to buy slack the AC then grants them.
  *
+ * Subtlety controls:
+ *   jitter-ms      — ±random variation per KeepAlive delay. Tests whether the
+ *                    AC detects constant artificial ping or also detects jittered
+ *                    ping (harder to distinguish from real network variance).
+ *   escalate-step  — delay grows by N ms per KeepAlive, simulating a slowly
+ *                    degrading connection to see if the AC adapts its tolerance
+ *                    window dynamically or uses a fixed threshold.
+ *
  * DETECTION: measure RTT at the proxy / from TCP-level keepalives, not from the
  * client-acknowledged application KeepAlive the client fully controls. A player
  * whose application-ping is high but whose TCP round-trip is low is spoofing.
@@ -33,14 +38,23 @@ public class PingSpoof extends Module {
 
     private final Setting<Boolean> maxWindow = sgGeneral.add(new BoolSetting.Builder()
         .name("max-window")
-        .description("Keepalive starvation: hold responses ~29s, just under the ~30s server timeout, for the maximum lag window without disconnecting. Overrides delay-ms.")
+        .description("Hold responses ~29s (just under the ~30s server timeout) for the maximum lag window. Overrides delay-ms.")
         .defaultValue(false).build()
     );
     private final Setting<Integer> delayMs = sgGeneral.add(new IntSetting.Builder()
-        .name("delay-ms")
-        .description("How long to hold KeepAlive responses (added apparent ping).")
+        .name("delay-ms").description("How long to hold KeepAlive responses (added apparent ping).")
         .defaultValue(500).range(0, 10000).sliderRange(0, 2000)
         .visible(() -> !maxWindow.get()).build()
+    );
+    private final Setting<Integer> jitterMs = sgGeneral.add(new IntSetting.Builder()
+        .name("jitter-ms")
+        .description("Random ±ms added to each KeepAlive delay. Tests jittered-ping vs. constant-ping detection.")
+        .defaultValue(0).range(0, 200).sliderRange(0, 100).build()
+    );
+    private final Setting<Integer> escalateStep = sgGeneral.add(new IntSetting.Builder()
+        .name("escalate-step")
+        .description("Delay increases by this many ms per KeepAlive sent. Tests dynamic tolerance adaptation.")
+        .defaultValue(0).range(0, 5000).sliderRange(0, 1000).build()
     );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
@@ -52,6 +66,7 @@ public class PingSpoof extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private long keepAliveCount = 0;
 
     private record Held(Packet<?> packet, long releaseAt) {}
     private final Deque<Held> queue = new ArrayDeque<>();
@@ -63,17 +78,23 @@ public class PingSpoof extends Module {
     }
 
     @Override
-    public void onActivate() { queue.clear(); }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; queue.clear(); keepAliveCount = 0; }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent); releaseAll(); }
+        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        releaseAll();
+    }
 
     @EventHandler
     private void onSend(PacketEvent.Send event) {
         if (!(event.packet instanceof KeepAliveC2SPacket)) return;
         lastEvent = event;
-        long delay = maxWindow.get() ? 29000 : delayMs.get();
+        long base = maxWindow.get() ? 29000L : delayMs.get();
+        long jit = jitterMs.get() > 0 ? (long) ((Math.random() * 2 - 1) * jitterMs.get()) : 0;
+        long esc = keepAliveCount * escalateStep.get();
+        long delay = base + jit + esc;
+        keepAliveCount++;
         queue.add(new Held(event.packet, System.currentTimeMillis() + delay));
         event.cancel();
     }
@@ -92,8 +113,8 @@ public class PingSpoof extends Module {
     private void releaseAll() {
         while (!queue.isEmpty()) {
             Packet<?> p = queue.poll().packet();
-            if (lastEvent != null) { lastEvent.sendSilently(p); packetsSent++; }
-            else if (mc.player != null) { mc.player.networkHandler.getConnection().send(p); packetsSent++; }
+            if (lastEvent != null) { lastEvent.sendSilently(p); }
+            else if (mc.player != null) { mc.player.networkHandler.getConnection().send(p); }
         }
     }
 

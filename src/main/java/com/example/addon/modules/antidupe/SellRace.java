@@ -2,6 +2,7 @@ package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -10,6 +11,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 
 /**
  * AUDIT: Sell / Economy Race (TOCTOU)
@@ -69,7 +71,7 @@ public class SellRace extends Module {
     }
 
     @Override
-    public void onActivate() { fired = 0; timer = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; fired = 0; timer = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -91,6 +93,13 @@ public class SellRace extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
+        String text = msg.content().getString();
+        if (!text.isBlank()) info("[Response] %s", text);
     }
 
     @EventHandler

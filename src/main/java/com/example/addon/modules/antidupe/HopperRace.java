@@ -3,11 +3,14 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 
@@ -42,6 +45,10 @@ public class HopperRace extends Module {
         .name("quick-move").description("Use QUICK_MOVE (shift-click) instead of PICKUP.")
         .defaultValue(true).build()
     );
+    private final Setting<Integer> phaseOffset = sgGeneral.add(new IntSetting.Builder()
+        .name("phase-offset").description("Align burst to hopper's 8-tick cycle. Tune 0–7 to compensate latency.")
+        .defaultValue(0).range(0, 7).sliderRange(0, 7).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -52,20 +59,27 @@ public class HopperRace extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private int hopperTick = 0;
 
     public HopperRace() {
         super(AddonTemplate.DUPE_CATEGORY, "hopper-race",
             "Floods clicks on hopper slots while the hopper transfer tick runs. Tests hopper transfer vs. player-click mutex.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; hopperTick = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;
+        hopperTick++;
         if (mc.player == null || mc.player.currentScreenHandler == null
             || mc.player.currentScreenHandler == mc.player.playerScreenHandler) {
             if (isActive()) warning("Open a hopper GUI first.");
             return;
         }
+        // Only fire on the tick aligned to the hopper's 8-tick transfer cycle
+        if ((hopperTick + phaseOffset.get()) % 8 != 0) return;
 
         var handler = mc.player.currentScreenHandler;
         int syncId = handler.syncId;
@@ -86,6 +100,14 @@ public class HopperRace extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
+            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
+        else if (event.packet instanceof InventoryS2CPacket p)
+            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
     }
 
     @EventHandler

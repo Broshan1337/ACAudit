@@ -3,10 +3,7 @@ package com.example.addon.modules.movement;
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 
@@ -19,6 +16,15 @@ import meteordevelopment.orbit.EventHandler;
  * this between cheats to flush their VL back to zero and never crosses the
  * ban/kick threshold.
  *
+ * Subtlety controls:
+ *   drift-speed    — apply random X/Z velocity per hop. Tests whether an AC
+ *                    also resets VL on lateral filler movement or only pure
+ *                    vertical hops.
+ *   hop-jitter     — ±random variation on upward velocity per hop. Tests
+ *                    variance-based hop detection within the "legal" range.
+ *   inter-hop-wait — ticks to wait between hops. Tests whether spaced-out
+ *                    filler movement is caught by the same VL drain mechanism.
+ *
  * DETECTION: do not decay VL on cheaply-produced filler movement. Use a leaky
  * bucket that only drains on movement that passed full physics validation, and
  * keep a separate long-window violation history that filler can't erase.
@@ -27,9 +33,22 @@ public class ResetVL extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
     private final Setting<Integer> hops = sgGeneral.add(new IntSetting.Builder()
-        .name("hops")
-        .description("Number of clean hops to perform, then disable.")
+        .name("hops").description("Number of clean hops to perform, then disable.")
         .defaultValue(10).range(1, 100).sliderRange(1, 30).build()
+    );
+    private final Setting<Double> driftSpeed = sgGeneral.add(new DoubleSetting.Builder()
+        .name("drift-speed")
+        .description("Random ±X/Z velocity per hop. Tests whether lateral filler movement also drains VL.")
+        .defaultValue(0.03).range(0.0, 0.2).sliderRange(0.0, 0.1).build()
+    );
+    private final Setting<Double> hopJitter = sgGeneral.add(new DoubleSetting.Builder()
+        .name("hop-jitter")
+        .description("Random ±variation on upward hop velocity. Tests variance-based detection within legal range.")
+        .defaultValue(0.01).range(0.0, 0.05).sliderRange(0.0, 0.04).build()
+    );
+    private final Setting<Integer> interHopWait = sgGeneral.add(new IntSetting.Builder()
+        .name("inter-hop-wait").description("Ticks to wait between hops. Tests spaced filler detection.")
+        .defaultValue(0).range(0, 10).sliderRange(0, 8).build()
     );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
@@ -41,8 +60,8 @@ public class ResetVL extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
-
     private int done = 0;
+    private int hopWaitCounter = 0;
 
     public ResetVL() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "reset-vl",
@@ -50,18 +69,27 @@ public class ResetVL extends Module {
     }
 
     @Override
-    public void onActivate() { done = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; done = 0; hopWaitCounter = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+
         if (mc.player.isOnGround()) {
-            mc.player.setVelocity(0.0, 0.1, 0.0);
+            if (hopWaitCounter > 0) { hopWaitCounter--; return; }
+
+            double drift = driftSpeed.get();
+            double dx = drift > 0 ? (Math.random() * 2 - 1) * drift : 0;
+            double dz = drift > 0 ? (Math.random() * 2 - 1) * drift : 0;
+            double jit = hopJitter.get() > 0 ? (Math.random() * 2 - 1) * hopJitter.get() : 0;
+            double vel = Math.max(0.05, 0.1 + jit);
+            mc.player.setVelocity(dx, vel, dz);
+            hopWaitCounter = interHopWait.get();
             done++;
             if (done >= hops.get()) toggle();
         } else if (mc.player.getVelocity().y > 0) {
-            mc.player.setVelocity(0.0, -0.1, 0.0);
+            mc.player.setVelocity(mc.player.getVelocity().x, -0.1, mc.player.getVelocity().z);
         }
     }
 

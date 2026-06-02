@@ -70,7 +70,7 @@ public class MessageLagger extends Module {
     }
 
     @Override
-    public void onActivate() {
+    public void onActivate() { ticksActive = 0; packetsSent = 0;
         if (!keepSending.get()) {
             send();
             toggle();

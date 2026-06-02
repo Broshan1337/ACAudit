@@ -8,6 +8,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
@@ -50,12 +51,26 @@ public class PassengerLoop extends Module {
         .name("show-stats").description("Print tick + packet count on deactivate.")
         .defaultValue(true).build()
     );
+    private final Setting<Boolean> autoMonitor = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-monitor")
+        .description("Auto-enable Server Health Monitor to track TPS impact while this module runs.")
+        .defaultValue(true).build()
+    );
 
     private int ticksActive = 0, packetsSent = 0;
 
     public PassengerLoop() {
         super(AddonTemplate.CRASH_CATEGORY, "passenger-loop",
             "Spams mount interactions to provoke a passenger cycle. Tests passenger-chain cycle guard / traversal bounds.");
+    }
+
+    @Override
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0;
+        if (autoMonitor.get()) {
+            var shm = Modules.get().get(ServerHealthMonitor.class);
+            if (shm != null && !shm.isActive()) shm.toggle();
+        }
     }
 
     @EventHandler

@@ -4,10 +4,7 @@ import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
@@ -27,17 +24,45 @@ import net.minecraft.screen.sync.ItemStackHash;
  * open container, no elevated permissions, just two crafted click packets on
  * the player's own inventory.
  *
+ * The player inventory handler (InventoryMenu) slot map is:
+ *   0      crafting result      1–4    2×2 crafting grid
+ *   5–8    armor                9–35   main inventory
+ *   36–44  hotbar               45     offhand
+ * Different slot types route through different server-side equip/transfer
+ * paths, so a dupe guard that covers the hotbar may still miss armor or
+ * offhand. CYCLE_SLOTS mode rotates through one of each type automatically.
+ *
  * Patch signal: enforce that every ClickSlotC2SPacket's revision matches the
  * server's current state sequence; on mismatch, reject and send a resync.
  * THROW must be atomic with the resulting dropped-entity creation — remove
- * the item from inventory before the entity is spawned, never concurrently.
+ * the item from inventory before the entity is spawned, never concurrently —
+ * and this must hold uniformly across armor, offhand, and hotbar slots.
  */
 public class DropPickupDupe extends Module {
+    public enum Mode { FIXED, CYCLE_SLOTS }
+
+    // One representative slot of each distinct equip/transfer path.
+    private static final short[] SLOT_TYPES = { 5, 45, 36, 9 }; // armor, offhand, hotbar, main
+
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
+    private final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>()
+        .name("mode")
+        .description("FIXED = the configured slot each tick. CYCLE_SLOTS = rotate armor / offhand / hotbar / main.")
+        .defaultValue(Mode.FIXED).build()
+    );
     private final Setting<Integer> targetSlot = sgGeneral.add(new IntSetting.Builder()
-        .name("slot").description("Inventory slot to drop+pickup.")
-        .defaultValue(0).range(0, 44).sliderRange(0, 44).build()
+        .name("slot").description("Inventory slot to drop+pickup (FIXED mode). 5–8 armor, 36–44 hotbar, 45 offhand.")
+        .defaultValue(36).range(0, 45).sliderRange(0, 45)
+        .visible(() -> mode.get() == Mode.FIXED).build()
+    );
+    private final Setting<Boolean> staleRevision = sgGeneral.add(new BoolSetting.Builder()
+        .name("stale-revision").description("Send revision=0 (stale). Disable to use the current server revision.")
+        .defaultValue(true).build()
+    );
+    private final Setting<Integer> pickupBurst = sgGeneral.add(new IntSetting.Builder()
+        .name("pickup-burst").description("PICKUP packets sent per THROW. Higher values widen the race window against slower servers.")
+        .defaultValue(5).range(1, 50).sliderRange(1, 20).build()
     );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
@@ -49,26 +74,41 @@ public class DropPickupDupe extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private int slotIdx;
 
     public DropPickupDupe() {
         super(AddonTemplate.DUPE_CATEGORY, "drop-pickup-dupe",
-            "THROW+PICKUP on same slot with revision=0. Tests stale-revision rejection.");
+            "THROW+PICKUP on same slot with revision=0. Tests stale-revision rejection across armor/offhand/hotbar slots.");
     }
+
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; slotIdx = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.player.currentScreenHandler == null) return;
         ticksActive++;
-        int  syncId = mc.player.currentScreenHandler.syncId;
-        short slot  = (short) (int) targetSlot.get();
+        int syncId = mc.player.currentScreenHandler.syncId;
+        int rev = staleRevision.get() ? 0 : mc.player.currentScreenHandler.getRevision();
+
+        short slot;
+        if (mode.get() == Mode.FIXED) {
+            slot = (short) (int) targetSlot.get();
+        } else {
+            slot = SLOT_TYPES[slotIdx % SLOT_TYPES.length];
+            slotIdx++;
+        }
+
         mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
-            syncId, 0, slot, (byte) 0, SlotActionType.THROW,
+            syncId, rev, slot, (byte) 0, SlotActionType.THROW,
             new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
+        packetsSent++;
+        for (int i = 0; i < pickupBurst.get(); i++) {
+            mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
+                syncId, rev, slot, (byte) 0, SlotActionType.PICKUP,
+                new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
             packetsSent++;
-        mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
-            syncId, 0, slot, (byte) 0, SlotActionType.PICKUP,
-            new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
-            packetsSent++;
+        }
     }
 
     @Override

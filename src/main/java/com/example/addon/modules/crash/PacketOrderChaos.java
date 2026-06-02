@@ -75,7 +75,7 @@ public class PacketOrderChaos extends Module {
     }
 
     @Override
-    public void onActivate() { fakeSyncId = 99; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; fakeSyncId = 99; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {

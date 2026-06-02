@@ -53,11 +53,15 @@ public class NanPosition extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private boolean kicked = false;
 
     public NanPosition() {
         super(AddonTemplate.CRASH_CATEGORY, "nan-position",
             "Sends NaN/Infinity coordinates. Tests server IEEE-754 coordinate sanitisation.");
     }
+
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; kicked = false; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -80,11 +84,15 @@ public class NanPosition extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+        }
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        kicked = true;
         if (autoDisable.get() && isActive()) toggle();
     }
 }

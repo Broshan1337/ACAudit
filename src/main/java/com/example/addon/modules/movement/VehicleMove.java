@@ -14,19 +14,22 @@ import net.minecraft.util.math.Vec3d;
  * AUDIT: Vehicle Move (boat / minecart fly & speed)
  *
  * The biggest movement blind spot on most ACs: vehicle position arrives in
- * ServerboundVehicleMove (VehicleMoveC2SPacket), a DIFFERENT path from player
- * movement, and is frequently validated far more loosely - or not at all. While
- * you're riding, this rewrites the vehicle's position each tick (vertical fly
- * and/or horizontal speed in your look direction) and reports it, so the server
- * sees a boat/minecart flying or moving faster than its physics allow.
+ * VehicleMoveC2SPacket, a DIFFERENT path from player movement, and is frequently
+ * validated far more loosely — or not at all.
  *
- * Boat-fly and boat-speed are perennial bypasses precisely because the player
- * movement checks never run on the vehicle.
+ * Subtlety controls:
+ *   speed-jitter       — ±random variation on horizontal speed per tick. Tests
+ *                        variance-based vehicle speed detection.
+ *   direction-noise    — rotate the yaw by ±N degrees when computing the direction
+ *                        vector. Makes the vehicle drift slightly, mimicking a player
+ *                        with imprecise steering.
+ *   send-only-on-change — suppress the packet when there is no movement input
+ *                        (f == 0 && s == 0). Reduces packet rate to mimic a real
+ *                        vehicle at rest.
  *
  * DETECTION: apply the SAME authority to vehicle movement as to player movement
- * - ground/collision validation, per-tick speed caps appropriate to the vehicle,
- * and continuity checks. Reject a vehicle position delta that exceeds the
- * vehicle's max speed or that places it in the air with no support.
+ * — ground/collision validation, per-tick speed caps appropriate to the vehicle,
+ * and continuity checks.
  */
 public class VehicleMove extends Module {
     public enum Mode { FLY, SPEED }
@@ -40,6 +43,21 @@ public class VehicleMove extends Module {
     private final Setting<Double> horizontal = sgGeneral.add(new DoubleSetting.Builder()
         .name("horizontal-speed").description("Blocks per tick in the look direction.")
         .defaultValue(0.6).range(0.0, 5.0).sliderRange(0.0, 1.5).build()
+    );
+    private final Setting<Double> speedJitter = sgGeneral.add(new DoubleSetting.Builder()
+        .name("speed-jitter")
+        .description("Random ±fraction applied to horizontal speed per tick. Tests variance-based vehicle speed detection.")
+        .defaultValue(0.0).range(0.0, 0.3).sliderRange(0.0, 0.2).build()
+    );
+    private final Setting<Double> directionNoise = sgGeneral.add(new DoubleSetting.Builder()
+        .name("direction-noise")
+        .description("Rotate yaw by ±N degrees when computing direction. Mimics imprecise steering.")
+        .defaultValue(0.0).range(0.0, 5.0).sliderRange(0.0, 3.0).build()
+    );
+    private final Setting<Boolean> sendOnlyOnChange = sgGeneral.add(new BoolSetting.Builder()
+        .name("send-only-on-change")
+        .description("Skip packet when there is no movement input (f==0 && s==0). Reduces packet noise.")
+        .defaultValue(false).build()
     );
     private final Setting<Double> vertical = sgGeneral.add(new DoubleSetting.Builder()
         .name("vertical-speed").description("Blocks per tick up/down (FLY mode, jump/sneak).")
@@ -62,6 +80,9 @@ public class VehicleMove extends Module {
             "Flies/speeds the vehicle you're riding via VehicleMoveC2SPacket. Tests vehicle-movement authority.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
@@ -69,17 +90,23 @@ public class VehicleMove extends Module {
         Entity vehicle = mc.player.getVehicle();
         if (vehicle == null) { warning("Not riding a vehicle, disabling."); toggle(); return; }
 
-        // horizontal vector from movement input rotated by player yaw
         double f = mc.player.forwardSpeed;
         double s = mc.player.sidewaysSpeed;
+
+        if (sendOnlyOnChange.get() && f == 0 && s == 0) return;
+
         double vx = 0, vz = 0;
         if (f != 0 || s != 0) {
             double len = Math.sqrt(f * f + s * s);
             f /= len; s /= len;
-            double yaw = Math.toRadians(mc.player.getYaw());
+            double noise = directionNoise.get();
+            double jit = speedJitter.get() > 0 ? (Math.random() * 2 - 1) * speedJitter.get() : 0;
+            double h = horizontal.get() * (1.0 + jit);
+            double yaw = Math.toRadians(mc.player.getYaw()
+                + (noise > 0 ? (Math.random() * 2 - 1) * noise : 0));
             double sin = Math.sin(yaw), cos = Math.cos(yaw);
-            vx = (f * -sin + s * cos) * horizontal.get();
-            vz = (f * cos + s * sin) * horizontal.get();
+            vx = (f * -sin + s * cos) * h;
+            vz = (f *  cos + s * sin) * h;
         }
 
         double vy;
@@ -88,14 +115,14 @@ public class VehicleMove extends Module {
             else if (mc.options.sneakKey.isPressed()) vy = -vertical.get();
             else vy = 0;
         } else {
-            vy = vehicle.getVelocity().y; // keep gravity in SPEED mode
+            vy = vehicle.getVelocity().y;
         }
 
         Vec3d p = vehicle.getEntityPos();
         vehicle.setPosition(p.x + vx, p.y + vy, p.z + vz);
         vehicle.setVelocity(vx, vy, vz);
         mc.player.networkHandler.sendPacket(VehicleMoveC2SPacket.fromVehicle(vehicle));
-            packetsSent++;
+        packetsSent++;
     }
 
     @Override

@@ -75,6 +75,9 @@ public class StructureStringFlood extends Module {
         return "A".repeat(length.get());
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;

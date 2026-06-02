@@ -3,12 +3,15 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 
@@ -51,6 +54,10 @@ public class CraftGridRace extends Module {
         .defaultValue(Keybind.fromKey(org.lwjgl.glfw.GLFW.GLFW_KEY_C))
         .visible(() -> trigger.get() == Trigger.KEYBIND).build()
     );
+    private final Setting<Boolean> staleRevision = sgGeneral.add(new BoolSetting.Builder()
+        .name("stale-revision").description("Send revision=0 instead of the current one.")
+        .defaultValue(false).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -70,7 +77,7 @@ public class CraftGridRace extends Module {
     }
 
     @Override
-    public void onActivate() { wasPressed = false; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -84,19 +91,27 @@ public class CraftGridRace extends Module {
 
         var handler = mc.player.currentScreenHandler;
         int syncId = handler.syncId;
-        int rev = handler.getRevision();
+        int rev = staleRevision.get() ? 0 : handler.getRevision();
         for (int i = 0; i < burst.get(); i++) {
             mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
                 syncId, rev, (short) (int) resultSlot.get(), (byte) 0, SlotActionType.QUICK_MOVE,
                 new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
             packetsSent++;
         }
-        info("Fired %d result-slot quick-moves.", burst.get());
+        info("Fired %d result-slot quick-moves (rev %d).", burst.get(), rev);
     }
 
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
+            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
+        else if (event.packet instanceof InventoryS2CPacket p)
+            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
     }
 
     @EventHandler

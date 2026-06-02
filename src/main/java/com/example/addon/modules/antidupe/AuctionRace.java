@@ -3,11 +3,13 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
@@ -69,6 +71,10 @@ public class AuctionRace extends Module {
         .description("Ticks between bursts so state can settle.")
         .defaultValue(40).range(1, 200).sliderRange(5, 100).build()
     );
+    private final Setting<Boolean> staleRevision = sgGeneral.add(new BoolSetting.Builder()
+        .name("stale-revision").description("Send revision=0 instead of the current one.")
+        .defaultValue(false).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -89,7 +95,7 @@ public class AuctionRace extends Module {
     }
 
     @Override
-    public void onActivate() { fired = 0; timer = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; fired = 0; timer = 0; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -102,10 +108,11 @@ public class AuctionRace extends Module {
         }
         if (timer > 0) { timer--; return; }
 
+        int rev = staleRevision.get() ? 0 : handler.getRevision();
         for (int i = 0; i < clicksPerTick.get(); i++) {
             mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
                 handler.syncId,
-                handler.getRevision(),          // valid, current revision
+                rev,
                 (short) (int) slot.get(),
                 click.get().button,
                 click.get().action,
@@ -124,6 +131,13 @@ public class AuctionRace extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
+        String text = msg.content().getString();
+        if (!text.isBlank()) info("[Response] %s", text);
     }
 
     @EventHandler

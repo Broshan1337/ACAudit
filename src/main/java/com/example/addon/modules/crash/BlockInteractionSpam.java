@@ -56,6 +56,9 @@ public class BlockInteractionSpam extends Module {
             "Floods block interact packets. Tests plugin event hook overhead and rate limiting.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;

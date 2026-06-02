@@ -5,6 +5,7 @@ import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 
@@ -31,6 +32,16 @@ public class ChunkBorderStress extends Module {
         .name("crossings-per-tick").description("Chunk-boundary crossings per tick.")
         .defaultValue(20).range(1, 500).sliderRange(1, 100).build()
     );
+    private final Setting<Boolean> rampMode = sgGeneral.add(new BoolSetting.Builder()
+        .name("ramp-mode")
+        .description("Auto-increment rate each tick to find the server's threshold. Starts at 1, steps up by ramp-step each tick.")
+        .defaultValue(false).build()
+    );
+    private final Setting<Integer> rampStep = sgGeneral.add(new IntSetting.Builder()
+        .name("ramp-step").description("Rate increase per tick in ramp mode.")
+        .defaultValue(10).range(1, 500).sliderRange(1, 100)
+        .visible(rampMode::get).build()
+    );
     private final Setting<Double> offset = sgGeneral.add(new DoubleSetting.Builder()
         .name("boundary-offset").description("Blocks either side of the chunk edge to ping-pong between.")
         .defaultValue(1.0).range(0.1, 8.0).sliderRange(0.1, 4.0).build()
@@ -43,8 +54,14 @@ public class ChunkBorderStress extends Module {
         .name("show-stats").description("Print tick + packet count on deactivate.")
         .defaultValue(true).build()
     );
+    private final Setting<Boolean> autoMonitor = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-monitor")
+        .description("Auto-enable Server Health Monitor to track TPS impact while this module runs.")
+        .defaultValue(true).build()
+    );
 
     private int ticksActive = 0, packetsSent = 0;
+    private int currentRate = 1;
 
     private boolean side = false;
 
@@ -54,19 +71,27 @@ public class ChunkBorderStress extends Module {
     }
 
     @Override
-    public void onActivate() { side = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; currentRate = 1; side = false;
+        if (autoMonitor.get()) {
+            var shm = Modules.get().get(ServerHealthMonitor.class);
+            if (shm != null && !shm.isActive()) shm.toggle();
+        }
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        int rate = rampMode.get() ? currentRate : crossingsPerTick.get();
+        if (rampMode.get()) currentRate += rampStep.get();
 
         // Snap to the nearest chunk edge (multiple of 16), then bounce ±offset
         double base = Math.round(mc.player.getX() / 16.0) * 16.0;
         double y = mc.player.getY();
         double z = mc.player.getZ();
 
-        for (int i = 0; i < crossingsPerTick.get(); i++) {
+        for (int i = 0; i < rate; i++) {
             side = !side;
             double x = side ? base + offset.get() : base - offset.get();
             mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
@@ -77,7 +102,10 @@ public class ChunkBorderStress extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            if (rampMode.get()) info("  Ramp: peak rate sent was %d/tick", currentRate - rampStep.get());
+        }
     }
 
     @EventHandler

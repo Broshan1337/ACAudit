@@ -52,11 +52,15 @@ public class ErrorCrash extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
+    private boolean kicked = false;
 
     public ErrorCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "error-crash",
             "Sends click-slot packets with invalid slot/button indices to trigger server-side exceptions.");
     }
+
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; kicked = false; }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
@@ -73,11 +77,15 @@ public class ErrorCrash extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+        }
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        kicked = true;
         if (autoDisable.get() && isActive()) toggle();
     }
 }

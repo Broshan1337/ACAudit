@@ -67,7 +67,7 @@ public class PositionCrash extends Module {
     }
 
     @Override
-    public void onActivate() {
+    public void onActivate() { ticksActive = 0; packetsSent = 0;
         if (!onTick.get()) {
             sendPackets();
             if (autoDisable.get()) toggle();

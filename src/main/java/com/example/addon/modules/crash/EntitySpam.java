@@ -60,6 +60,9 @@ public class EntitySpam extends Module {
             "Spams attack/interact + arm-swing packets on the crosshair entity. Tests entity interaction rate-limiting and combat cooldown enforcement.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;

@@ -3,6 +3,7 @@ package com.example.addon.modules.antidupe;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -11,6 +12,8 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 import net.minecraft.util.hit.BlockHitResult;
@@ -55,6 +58,10 @@ public class ShulkerRace extends Module {
         .name("break-block").description("Send block-break packets on the shulker.")
         .defaultValue(true).build()
     );
+    private final Setting<Boolean> staleRevision = sgGeneral.add(new BoolSetting.Builder()
+        .name("stale-revision").description("Send revision=0 in grab packets instead of the current one.")
+        .defaultValue(false).build()
+    );
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -74,7 +81,10 @@ public class ShulkerRace extends Module {
     }
 
     @Override
-    public void onActivate() { wasPressed = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; wasPressed = false;
+        info("Tip: combine with enderchest-desync for dimension-spanning shulker persistence test.");
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -112,7 +122,7 @@ public class ShulkerRace extends Module {
         int containerSlots = handler.slots.size() - 36; // player inv is always 36 trailing slots
         if (containerSlots <= 0) return;
         int syncId = handler.syncId;
-        int rev = handler.getRevision();
+        int rev = staleRevision.get() ? 0 : handler.getRevision();
         for (int i = 0; i < containerSlots; i++) {
             mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
                 syncId, rev, (short) i, (byte) 0, SlotActionType.QUICK_MOVE,
@@ -126,6 +136,9 @@ public class ShulkerRace extends Module {
             PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, dir));
             packetsSent++;
         mc.player.networkHandler.sendPacket(new PlayerActionC2SPacket(
+            PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, dir));
+            packetsSent++;
+        mc.player.networkHandler.sendPacket(new PlayerActionC2SPacket(
             PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, dir));
             packetsSent++;
     }
@@ -133,6 +146,14 @@ public class ShulkerRace extends Module {
     @Override
     public void onDeactivate() {
         if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) {
+        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
+            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
+        else if (event.packet instanceof InventoryS2CPacket p)
+            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
     }
 
     @EventHandler

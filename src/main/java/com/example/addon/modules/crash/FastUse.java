@@ -56,6 +56,9 @@ public class FastUse extends Module {
             "Triggers item use faster than vanilla allows. Tests server-side use/cooldown enforcement (eat, pearl, potion).");
     }
 
+    @Override
+    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;

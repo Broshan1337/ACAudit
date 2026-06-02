@@ -31,12 +31,21 @@ import net.minecraft.screen.sync.ItemStackHash;
  */
 public class CloseClick extends Module {
     public enum Order { CLOSE_THEN_CLICK, CLICK_THEN_CLOSE }
+    public enum Action { PICKUP, QUICK_MOVE, THROW }
 
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
     private final Setting<Integer> slot = sgGeneral.add(new IntSetting.Builder()
         .name("slot").description("Slot to click in the same tick as the close.")
         .defaultValue(0).range(0, 200).sliderRange(0, 53).build()
+    );
+    private final Setting<Action> action = sgGeneral.add(new EnumSetting.Builder<Action>()
+        .name("action").description("Click action type to send.")
+        .defaultValue(Action.PICKUP).build()
+    );
+    private final Setting<Integer> burst = sgGeneral.add(new IntSetting.Builder()
+        .name("burst").description("Click packets sent alongside the close.")
+        .defaultValue(3).range(1, 50).sliderRange(1, 20).build()
     );
     private final Setting<Order> order = sgGeneral.add(new EnumSetting.Builder<Order>()
         .name("order").description("Packet ordering within the tick.")
@@ -65,7 +74,7 @@ public class CloseClick extends Module {
     }
 
     @Override
-    public void onActivate() { wasPressed = false; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -78,23 +87,33 @@ public class CloseClick extends Module {
 
         int syncId = mc.player.currentScreenHandler.syncId;
         int rev = mc.player.currentScreenHandler.getRevision();
-        ClickSlotC2SPacket click = new ClickSlotC2SPacket(
-            syncId, rev, (short) (int) slot.get(), (byte) 0, SlotActionType.PICKUP,
-            new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY);
+        SlotActionType act = switch (action.get()) {
+            case PICKUP -> SlotActionType.PICKUP;
+            case QUICK_MOVE -> SlotActionType.QUICK_MOVE;
+            case THROW -> SlotActionType.THROW;
+        };
         CloseHandledScreenC2SPacket close = new CloseHandledScreenC2SPacket(syncId);
 
         if (order.get() == Order.CLOSE_THEN_CLICK) {
             mc.player.networkHandler.sendPacket(close);
             packetsSent++;
-            mc.player.networkHandler.sendPacket(click);
-            packetsSent++;
+            for (int i = 0; i < burst.get(); i++) {
+                mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
+                    syncId, rev, (short) (int) slot.get(), (byte) 0, act,
+                    new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
+                packetsSent++;
+            }
         } else {
-            mc.player.networkHandler.sendPacket(click);
-            packetsSent++;
+            for (int i = 0; i < burst.get(); i++) {
+                mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
+                    syncId, rev, (short) (int) slot.get(), (byte) 0, act,
+                    new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
+                packetsSent++;
+            }
             mc.player.networkHandler.sendPacket(close);
             packetsSent++;
         }
-        info("Sent %s on slot %d (syncId %d)", order.get(), slot.get(), syncId);
+        info("Sent %s x%d %s on slot %d (syncId %d)", order.get(), burst.get(), action.get(), slot.get(), syncId);
     }
 
     @Override
