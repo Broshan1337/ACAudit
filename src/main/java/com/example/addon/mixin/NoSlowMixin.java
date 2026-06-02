@@ -20,6 +20,6 @@ public abstract class NoSlowMixin {
     @Inject(method = "getActiveItemSpeedMultiplier", at = @At("HEAD"), cancellable = true)
     private void removeItemUseSlowdown(CallbackInfoReturnable<Float> cir) {
         NoSlow noSlow = Modules.get().get(NoSlow.class);
-        if (noSlow != null && noSlow.isActive()) cir.setReturnValue(1.0F);
+        if (noSlow != null && noSlow.isActive()) cir.setReturnValue(noSlow.getSpeedFactor());
     }
 }
