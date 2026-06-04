@@ -76,6 +76,21 @@ import com.example.addon.modules.movement.StealthFly;
 import com.example.addon.modules.movement.Timer;
 import com.example.addon.modules.movement.VehicleMove;
 import com.example.addon.modules.movement.VelocityExploit;
+import com.example.addon.modules.movement.UncertaintyFarm;
+import com.example.addon.modules.movement.OffsetBoundary;
+import com.example.addon.modules.movement.InputLaunder;
+import com.example.addon.modules.movement.CompensationBoundary;
+import com.example.addon.modules.movement.SimGapSuite;
+import com.example.addon.modules.movement.EntityPushModel;
+import com.example.addon.modules.movement.ReachWorldStateRace;
+import com.example.addon.modules.movement.SetbackInterference;
+import com.example.addon.modules.movement.TimerBalanceSoak;
+import com.example.addon.modules.movement.AccumulatorSoak;
+import com.example.addon.modules.movement.FPCover;
+import com.example.addon.modules.movement.SourceAttribution;
+import com.example.addon.modules.movement.LowTPSReach;
+import com.example.addon.modules.movement.BaselinePoison;
+import com.example.addon.modules.movement.VehicleSimGap;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
@@ -143,6 +158,23 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new StateMachineFuzz());
         Modules.get().add(new PacketOrderSkew());
         Modules.get().add(new CombatStateProbe());
+
+        // --- Movement deep-coverage (modern/predictive-AC: prediction, compensation, simulation gaps, soak, FP) ---
+        Modules.get().add(new UncertaintyFarm());
+        Modules.get().add(new OffsetBoundary());
+        Modules.get().add(new InputLaunder());
+        Modules.get().add(new CompensationBoundary());
+        Modules.get().add(new SimGapSuite());
+        Modules.get().add(new EntityPushModel());
+        Modules.get().add(new ReachWorldStateRace());
+        Modules.get().add(new SetbackInterference());
+        Modules.get().add(new TimerBalanceSoak());
+        Modules.get().add(new AccumulatorSoak());
+        Modules.get().add(new FPCover());
+        Modules.get().add(new SourceAttribution());
+        Modules.get().add(new LowTPSReach());
+        Modules.get().add(new BaselinePoison());
+        Modules.get().add(new VehicleSimGap());
 
         // --- Anti-dupe ---
         Modules.get().add(new SlotExploit());
