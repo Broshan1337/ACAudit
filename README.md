@@ -74,12 +74,38 @@ A basic anti-cheat **measures values**; a good one **models physics**; a great o
 | `chunk-edge-move` | oscillates across the nearest chunk seam with borderline steps — a **validation gap at chunk boundaries** |
 | `legit-velocity-launder` | latches a legitimate velocity source (KB/ice/current/piston) and retains it past natural decay — whether the AC models velocity **decay**, not just its source (also the ice false-positive test) |
 | `physics-anomaly` | 7 borrowed-physics trajectories (gravity / step-stack / swim / slow-fall / levitation / vehicle / scaffold) the player isn't actually in — **state-gated** physics validation |
-| `transaction-timing` | delays ping/transaction Pong replies independently of movement timing — whether transaction-RTT leniency can be **desynced** from real movement timing |
+| `transaction-timing` | delays the vanilla **transaction** (`CommonPing`/`Pong`) replies — the clock transaction-based latency compensation actually reads (unlike `ping-spoof`'s keepalive path) — to inflate the latency the AC measures and widen its tolerance |
 | `state-machine-fuzz` | cycles ground/air transitions faster than the jump cooldown allows, each transition individually valid — **transition-rate** limiting |
 | `packet-order-skew` | reorders the tick's move and action packets (action-first / interleaved) — whether the AC assumes a fixed **per-tick packet order** |
 | `combat-state-probe` | one attack while in an impossible movement state (jump apex / fast move / sprint desync) — **combat↔movement state sharing** (a minimal probe, not a kill-aura) |
 
 Several existing modules also gained deep-coverage modes: `speed` (`adaptive-seek` finds the exact detection threshold), `ac-high-jump` (ramp + observer = adaptive threshold-seeking), `ac-timer` (`clock-drift`: an undetectable sub-1% sustained drift that accumulates over a minute), `reset-vl` (`interleave-violation`: slips a real violation among the filler and reports whether VL ever flags it), `anti-setback` (`reassert-position`: leaves the AC's model inconsistent), `elytra-exploit` (`transition-carry`: carries glide momentum into on-foot movement), and `ping-spoof` (`realistic-latency`: organic jitter/spikes/drift instead of a flat delay).
+
+#### Modern / predictive-AC deep coverage — architecture, not values
+
+The probes above test whether an AC models physics. These test the **architecture** modern anti-cheats are built on — *generically*, against any server (vanilla/Bukkit/Spigot/Paper) and any AC (Grim, Vulcan, Verus, Matrix, Spartan, AAC, custom). They target the surfaces a *correct* design must defend: **prediction/simulation tolerance budgets**, **transaction-based latency compensation**, **block-physics simulation gaps**, **check interaction**, **long-session integrity**, and **deliberately-tolerated false positives**. Every patch signal below describes what *any* well-implemented server/AC should do — not what one product does.
+
+Three shared helpers back them: **`TransactionAnchor`** (reads the server's `CommonPing`/`Pong` transaction cadence as a precise acknowledged-tick boundary and can inject a measured Pong delay to probe the compensation window — honest about what a client cannot do: it can't initiate a transaction or read the server-side RTT), **`OffsetSeeker`** (drives any value up in steps until the server first corrects, reporting the exact tolerated boundary), and **`BaselineProfiler`** (clean-baseline-then-gradual-ramp sequencer for the profile/heuristic AC class).
+
+| Module | Tests | Patch signal (what any well-implemented AC should do) |
+|---|---|---|
+| `uncertainty-farm` | waits for a **real** uncertainty source (push / slime / ice) then spends a small illegal delta inside the borrowed tolerance window | scope every tolerance grant to its source and decay it per-tick — knockback slack must not pay for a speed delta |
+| `offset-boundary` | maps the exact horizontal-offset the AC tolerates in the player's current state (ground/air/water/ice/sprint) — an instrument, not a bypass | the located boundary should equal, not exceed, the legal simulation envelope for that state |
+| `input-launder` | reports a delta shaped like a legal input the player isn't pressing (sprint while idle, jump while grounded) | flag when the only input that explains the motion contradicts the client's claimed held keys |
+| `compensation-boundary` | holds a fixed illegal delta and **ramps injected transaction latency** until the compensation window absorbs it | hard-cap the window and cross-check transaction latency against an independent RTT |
+| `sim-gap-suite` | borrows special-case **block physics** (powder snow / bubble columns / cobweb / honey / edge-vs-centre landing / scaffold) without the block present | gate every special-case physics rule behind the authoritative block at that position |
+| `entity-push-model` | spends a small delta only while a **real entity crowd** is pushing you | bound push tolerance by the actual entities present and their max push, never open slack for "being in a crowd" |
+| `reach-world-state-race` | fires one attack on the exact tick the target's position/velocity update lands — the one genuine concurrency surface | compute reach against the compensated position **history** at the acknowledged tick, never the live target position |
+| `setback-interference` | provokes a setback then fires a second illegal hop inside the pending-setback window | apply the pending setback to **every** dependent check's baseline atomically; ignore movement until the teleport confirms |
+| `timer-balance-soak` | inflates flying-packet rate by a sub-1% drift over a **long session** | reconcile the timer balance to an authoritative clock with bounded, symmetric decay |
+| `accumulator-soak` | emits one identical violation at a fixed cadence all session, watching whether the correction rate **drifts** | response to an identical violation must be invariant to session length and packet count |
+| `fp-cover` | adds a minimal illegal delta while you perform a **documented false-positive** scenario (elytra-wall, ice-edge, vehicle desync, near-void, knockback-lag, piston, riptide-rain) | an FP exemption must be scoped so the legit scenario passes but scenario-plus-delta still flags |
+| `source-attribution` | holds a fixed speed; run with and without a real velocity source and compare | identical speed must be accepted **with** a source and corrected **without** one |
+| `low-tps-reach` | attacks the nearest target beyond normal reach and records distance vs **TPS** (pair with a Crash-tab load module) | reach leniency under low TPS must be bounded; max accepted reach stays near vanilla regardless of lag |
+| `baseline-poison` | behaves cleanly to establish a baseline, then **drifts** a delta in as a continuation — probes the profile/heuristic class (labeled: not deterministic-physics ACs) | anchor the behavioral baseline to physically legal bounds, not the player's own movable history |
+| `vehicle-sim-gap` | vehicle-specific gaps — ice overspeed, passenger↔vehicle position desync (counts `VehicleMoveS2C` corrections) | apply the same authority to vehicle movement as to player movement, and reconcile passenger position against its vehicle |
+
+**Honest scope on the older modules:** `ping-spoof` (keepalive-delay), `anti-setback` (drops the correction), and `packet-order-skew` (reorders a tick's packets) each now carry a **SCOPE** note stating which architecture they bite and where they're inert — keepalive-based, client-trusted-setback, and packet-reordering ACs respectively. Against a transaction-based, server-authoritative, in-order AC a *null* result from these **is the pass**, and the new modules above cover those architectures directly.
 
 ###  AuditAC-Dupe — duplication & economy probes
 Tests inventory/container atomicity and economy-plugin input handling.
