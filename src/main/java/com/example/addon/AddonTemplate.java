@@ -5,6 +5,14 @@ import com.example.addon.hud.HudExample;
 import com.example.addon.modules.ModuleExample;
 import com.example.addon.modules.antidupe.AnvilGrindstoneRace;
 import com.example.addon.modules.antidupe.AuctionRace;
+import com.example.addon.modules.antidupe.StationResultRace;
+import com.example.addon.modules.antidupe.BeaconEffectRace;
+import com.example.addon.modules.antidupe.DeathDropRace;
+import com.example.addon.modules.antidupe.RevisionAbuse;
+import com.example.addon.modules.antidupe.CreativeDupe;
+import com.example.addon.modules.antidupe.EventBypassProbe;
+import com.example.addon.modules.antidupe.SpectatorTransition;
+import com.example.addon.modules.antidupe.TradeShopOverlap;
 import com.example.addon.modules.antidupe.ChestShopRace;
 import com.example.addon.modules.antidupe.DeathInventoryRace;
 import com.example.addon.modules.antidupe.DragSplitRace;
@@ -37,6 +45,18 @@ import com.example.addon.modules.crash.*;
 import com.example.addon.modules.testing.*;
 import com.example.addon.modules.movement.AirJump;
 import com.example.addon.modules.movement.AntiSetback;
+import com.example.addon.modules.movement.MomentumBreak;
+import com.example.addon.modules.movement.GroundStateForge;
+import com.example.addon.modules.movement.JumpArcForge;
+import com.example.addon.modules.movement.ModelDrift;
+import com.example.addon.modules.movement.BlockUpdateRace;
+import com.example.addon.modules.movement.ChunkEdgeMove;
+import com.example.addon.modules.movement.LegitVelocityLaunder;
+import com.example.addon.modules.movement.PhysicsAnomaly;
+import com.example.addon.modules.movement.TransactionTiming;
+import com.example.addon.modules.movement.StateMachineFuzz;
+import com.example.addon.modules.movement.PacketOrderSkew;
+import com.example.addon.modules.movement.CombatStateProbe;
 import com.example.addon.modules.movement.Bhop;
 import com.example.addon.modules.movement.Blink;
 import com.example.addon.modules.movement.ElytraExploit;
@@ -79,6 +99,12 @@ public class AddonTemplate extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing ACAudit");
 
+        // Register an outbound custom-payload type so channel-flood can ship a
+        // valid plugin-channel header with an arbitrary (malformed/oversized) body.
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S()
+            .register(com.example.addon.modules.crash.MalformedPayload.ID,
+                      com.example.addon.modules.crash.MalformedPayload.CODEC);
+
         Modules.get().add(new ModuleExample());
 
         // --- Movement ---
@@ -103,6 +129,20 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new ElytraExploit());
         Modules.get().add(new RiptideLaunch());
         Modules.get().add(new Phase());
+
+        // --- Movement deep-coverage (physics-consistency / AC-model probes) ---
+        Modules.get().add(new MomentumBreak());
+        Modules.get().add(new GroundStateForge());
+        Modules.get().add(new JumpArcForge());
+        Modules.get().add(new ModelDrift());
+        Modules.get().add(new BlockUpdateRace());
+        Modules.get().add(new ChunkEdgeMove());
+        Modules.get().add(new LegitVelocityLaunder());
+        Modules.get().add(new PhysicsAnomaly());
+        Modules.get().add(new TransactionTiming());
+        Modules.get().add(new StateMachineFuzz());
+        Modules.get().add(new PacketOrderSkew());
+        Modules.get().add(new CombatStateProbe());
 
         // --- Anti-dupe ---
         Modules.get().add(new SlotExploit());
@@ -135,6 +175,15 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new BundleDupe());
         Modules.get().add(new PortalDupe());
         Modules.get().add(new AnvilGrindstoneRace());
+        // --- Deep-coverage dupe vectors (precise timing, state windows, new stations) ---
+        Modules.get().add(new StationResultRace());
+        Modules.get().add(new BeaconEffectRace());
+        Modules.get().add(new DeathDropRace());
+        Modules.get().add(new RevisionAbuse());
+        Modules.get().add(new CreativeDupe());
+        Modules.get().add(new EventBypassProbe());
+        Modules.get().add(new SpectatorTransition());
+        Modules.get().add(new TradeShopOverlap());
 
         // --- Crash / stability ---
         Modules.get().add(new PayloadFlood());
@@ -175,6 +224,16 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new FastMine());
         Modules.get().add(new FastUse());
         Modules.get().add(new FastAttack());
+
+        // --- Deep-coverage vectors (asymmetric cost, state transitions, edge surfaces) ---
+        Modules.get().add(new NbtQueryFlood());
+        Modules.get().add(new TrackerThrash());
+        Modules.get().add(new ChunkAckSpoof());
+        Modules.get().add(new RespawnRace());
+        Modules.get().add(new StatsRequestFlood());
+        Modules.get().add(new ResourcePackDesync());
+        Modules.get().add(new SpectatorTpEdge());
+        Modules.get().add(new TransitionRace());
 
         // --- Testing tab: diagnostics, automated harness, experimental abuse ---
         Modules.get().add(new ServerHealthMonitor());
