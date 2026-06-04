@@ -37,6 +37,15 @@ import java.util.Deque;
  * StealthFly, Phase). The canonical Phase+AntiSetback combo tests wall-phase
  * bypass. With Blink: go silent → illegal move → flush → block correction.
  *
+ * SCOPE — which targets this bites: an AC whose enforcement is a CLIENT-trusted
+ * position correction (it sends the setback and assumes the client complies). It is
+ * effectively INERT against any AC whose setback is server-authoritative and
+ * transaction-confirmed — there the server holds you at the setback position and
+ * ignores your movement until you confirm the teleport, so dropping the correction
+ * client-side only desyncs you locally while the server keeps re-setting you back.
+ * Use this to find out which kind your setup is; for a server-authoritative setback
+ * the correct result is that this changes nothing, and that IS the pass.
+ *
  * NOTE: cancelling these blocks legitimate teleports (pearls, /tp, portals)
  * while active. Use only to probe enforcement, then disable.
  */

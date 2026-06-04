@@ -37,6 +37,10 @@ import meteordevelopment.orbit.EventHandler;
  *     in water? in a vehicle? block under foot?) — never infer the state from the
  *     movement that the state would permit.
  *
+ * Complement: sim-gap-suite ({@link SimGapSuite}) covers the BLOCK-specific physics
+ * gaps (powder snow, bubble columns, cobweb, honey, edge-vs-centre landing) this
+ * module's effect/vehicle modes don't; run both for full state-gating coverage.
+ *
  * Run against your OWN server only.
  */
 public class PhysicsAnomaly extends Module {

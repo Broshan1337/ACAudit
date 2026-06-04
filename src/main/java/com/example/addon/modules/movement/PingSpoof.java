@@ -32,6 +32,14 @@ import java.util.Deque;
  * DETECTION: measure RTT at the proxy / from TCP-level keepalives, not from the
  * client-acknowledged application KeepAlive the client fully controls. A player
  * whose application-ping is high but whose TCP round-trip is low is spoofing.
+ *
+ * SCOPE — which targets this bites: an AC that derives latency compensation from
+ * the application KeepAlive cycle. It is INERT against an AC that times off the
+ * vanilla TRANSACTION (CommonPing/Pong) instead — that clock is independent of
+ * KeepAlive, so delaying KeepAlive buys no compensation slack there. To probe a
+ * transaction-based compensation system use transaction-timing ({@link
+ * TransactionTiming}) / compensation-boundary ({@link CompensationBoundary}), which
+ * manipulate the Pong reply the transaction clock actually reads.
  */
 public class PingSpoof extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();

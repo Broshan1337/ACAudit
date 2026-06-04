@@ -84,6 +84,11 @@ public final class MovementObserver {
     public boolean enabled() { return observe.get(); }
     public boolean kicked()  { return kicked; }
     public int setbackCount() { return setbacks; }
+    public int silentCount() { return silent; }
+    /** True only for the window after a probe before the server has either corrected or the window expired. */
+    public boolean awaitingOutcome() { return awaitingEcho; }
+    /** Largest single correction magnitude (blocks) seen so far, 0 if none. */
+    public double maxCorrection() { return maxCorrection; }
 
     public void onActivate() {
         kicked = false; kickReason = null;

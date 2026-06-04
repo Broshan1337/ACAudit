@@ -36,6 +36,13 @@ import java.util.List;
  *   Fix: order-independent validation, or canonicalize per-tick packet order
  *     before validating (apply all movement for the tick, then actions).
  *
+ * SCOPE — which targets this bites: an AC that parallelizes or reorders a single
+ * player's packets, or assumes a canonical pipeline. It is largely INERT against an
+ * AC that processes each player's packets strictly in received order (most do), in
+ * which case reordering them just changes the order they are validated in, with the
+ * same per-packet result. A null result here means the target serializes correctly,
+ * which IS the pass; a difference means an order assumption to fix.
+ *
  * This is the non-flood ordering probe; it does NOT flood the queue. Run on YOUR
  * server only.
  */

@@ -7,108 +7,82 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.c2s.common.CommonPongC2SPacket;
-
-import java.util.ArrayDeque;
-import java.util.Deque;
 
 /**
- * AUDIT: Transaction Timing (ping/pong response-rate probe — axis 4)
+ * AUDIT: Transaction Timing (transaction-clock compensation probe)
  *
- * Some anticheats measure precise client response time with ping/transaction
- * packets (CommonPing → the client's CommonPong). This holds the client's Pong
- * replies by a configurable delay INDEPENDENTLY of movement-packet timing, so the
- * latency the AC infers from transactions disagrees with the player's real
- * movement timing.
+ * Many proactive anticheats measure a player's latency from the vanilla TRANSACTION
+ * — the server sends CommonPing(id) and times how long the client takes to reply
+ * CommonPong(id) — and size their lag compensation from that, INDEPENDENTLY of
+ * KeepAlive. This module delays the Pong replies (via TransactionAnchor) so the
+ * latency the AC measures on its real compensation clock is inflated, then lets any
+ * paired movement module's MovementObserver read whether a move corrected at honest
+ * timing slips through under the widened window.
  *
- *   What it exploits: that transaction-RTT and movement-RTT are measured
- *     separately and assumed to agree.
- *   Measurement AC: grants leniency proportional to the (spoofed) transaction RTT.
- *   Physics AC: still validates movement on its own clock — but if it sizes its
- *     tolerance window from transaction RTT, that window is now wrong.
- *   Intent AC: cross-checks the two latency estimates and flags the disagreement.
- *   Fix: derive a single authoritative latency from the transport, and reconcile
- *     transaction-RTT vs movement-cadence; a large disagreement is itself a signal.
+ *   What it exploits: compensation sized from the transaction RTT the client can
+ *     stretch by holding its Pong.
+ *   Measurement AC: no transaction clock; unaffected.
+ *   Simulation AC: grants extra tolerance proportional to the inflated transaction
+ *     latency — the surface this probes.
+ *   Intent AC: caps the window and cross-checks transaction latency against an
+ *     independent RTT, refusing slack when the signals disagree.
+ *   Fix (any well-implemented AC): bound the compensation window and reconcile
+ *     transaction-derived latency with transport/movement latency before granting
+ *     a wider tolerance.
  *
- * Pairs with any movement module: spoof a high transaction RTT here, then see (via
- * that module's MovementObserver) whether a move that gets set back at honest
- * timing is silently accepted under the inflated transaction window.
- * Run against your OWN server only.
+ * Unlike ping-spoof (which delays KeepAlive and is inert against transaction-based
+ * compensation), this manipulates the exact reply the transaction clock reads. Pair
+ * with a movement module and compare its outcome here vs. with timing honest. For a
+ * self-contained boundary sweep, use compensation-boundary. Run on YOUR server.
  */
 public class TransactionTiming extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
-    private final Setting<Integer> delayMs = sgGeneral.add(new IntSetting.Builder()
-        .name("pong-delay-ms").description("How long to hold each Pong reply (flat fallback when realistic-latency is off).")
-        .defaultValue(400).range(0, 10000).sliderRange(0, 2000).build()
-    );
-
-    private final LatencyModel latency = new LatencyModel(sgGeneral);
+    private final TransactionAnchor anchor = new TransactionAnchor(sgGeneral);
 
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
     );
     private final Setting<Boolean> showStats = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-stats").description("Print tick + packet count on deactivate.")
+        .name("show-stats").description("Print summary on deactivate.")
         .defaultValue(true).build()
     );
 
-    private int ticksActive = 0, packetsSent = 0;
-    private long activatedAt = 0;
-
-    private record Held(Packet<?> packet, long releaseAt) {}
-    private final Deque<Held> queue = new ArrayDeque<>();
-    private PacketEvent.Send lastEvent;
+    private int ticksActive = 0;
 
     public TransactionTiming() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "transaction-timing",
-            "Delays ping/transaction Pong replies independently of movement timing. Tests whether transaction-RTT leniency can be desynced from real movement timing.");
+            "Delays transaction Pong replies to inflate the latency a transaction-based AC measures. Tests transaction-clock compensation (unlike ping-spoof's keepalive path).");
     }
 
     @Override
-    public void onActivate() {
-        ticksActive = 0; packetsSent = 0; queue.clear(); activatedAt = System.currentTimeMillis();
-    }
-
-    @Override
-    public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
-        releaseAll();
-    }
+    public void onActivate() { ticksActive = 0; anchor.onActivate(); }
 
     @EventHandler
-    private void onSend(PacketEvent.Send event) {
-        if (!(event.packet instanceof CommonPongC2SPacket)) return;
-        lastEvent = event;
-        long elapsed = System.currentTimeMillis() - activatedAt;
-        long delay = latency.nextDelayMs(delayMs.get(), elapsed);
-        queue.add(new Held(event.packet, System.currentTimeMillis() + delay));
-        event.cancel();
-    }
+    private void onSend(PacketEvent.Send event) { anchor.onPongSend(event); }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { anchor.onReceive(event.packet); }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;
-        long now = System.currentTimeMillis();
-        while (!queue.isEmpty() && queue.peek().releaseAt() <= now) {
-            Packet<?> p = queue.poll().packet();
-            if (lastEvent != null) { lastEvent.sendSilently(p); packetsSent++; }
-            else if (mc.player != null) { mc.player.networkHandler.getConnection().send(p); packetsSent++; }
-        }
+        anchor.tick();
     }
 
-    private void releaseAll() {
-        while (!queue.isEmpty()) {
-            Packet<?> p = queue.poll().packet();
-            if (lastEvent != null) lastEvent.sendSilently(p);
-            else if (mc.player != null) mc.player.networkHandler.getConnection().send(p);
+    @Override
+    public void onDeactivate() {
+        anchor.flush();
+        if (showStats.get()) {
+            info("Summary: %d ticks active.", ticksActive);
+            anchor.report(l -> info("%s", l));
         }
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        anchor.flush();
         if (autoDisable.get() && isActive()) toggle();
     }
 }
