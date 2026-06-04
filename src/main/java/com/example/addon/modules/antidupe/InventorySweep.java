@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -10,8 +11,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
-import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
-import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 
@@ -50,6 +49,10 @@ public class InventorySweep extends Module {
         .defaultValue(Keybind.fromKey(org.lwjgl.glfw.GLFW.GLFW_KEY_K))
         .visible(() -> trigger.get() == Trigger.KEYBIND).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -69,7 +72,10 @@ public class InventorySweep extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; wasPressed = false;
+        obs.onActivate(); preStress.onActivate(this);
+    }
 
     private byte button() { return (byte) (action.get() == Action.RIGHT ? 1 : 0); }
     private SlotActionType act() {
@@ -84,6 +90,7 @@ public class InventorySweep extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.player.currentScreenHandler == null) return;
         ticksActive++;
+        obs.tick();
 
         boolean fire;
         if (trigger.get() == Trigger.EACH_TICK) fire = true;
@@ -104,23 +111,24 @@ public class InventorySweep extends Module {
             packetsSent++;
             }
         }
+        obs.markFired();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
-    private void onReceivePacket(PacketEvent.Receive event) {
-        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
-            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
-        else if (event.packet instanceof InventoryS2CPacket p)
-            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
-    }
+    private void onReceivePacket(PacketEvent.Receive event) { obs.survey(event.packet, l -> info("%s", l)); }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

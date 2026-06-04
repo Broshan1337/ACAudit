@@ -2,6 +2,7 @@ package com.example.addon.modules.movement;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -48,6 +49,9 @@ public class OmniSprint extends Module {
         .defaultValue(0).range(0, 100).sliderRange(0, 40)
         .visible(() -> burstTicks.get() > 0).build()
     );
+
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -66,13 +70,14 @@ public class OmniSprint extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; burstCounter = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; burstCounter = 0; obs.onActivate(); }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
         burstCounter++;
+        obs.tick();
 
         int bt = burstTicks.get(), rt = restTicks.get();
         boolean inBurst = (bt == 0 && rt == 0) || (bt + rt > 0 && (burstCounter % (bt + rt)) < bt);
@@ -84,16 +89,24 @@ public class OmniSprint extends Module {
         }
 
         mc.player.setSprinting(true);
+        obs.markSent();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
         if (mc.player != null) mc.player.setSprinting(false);
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

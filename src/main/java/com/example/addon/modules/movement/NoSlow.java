@@ -2,6 +2,7 @@ package com.example.addon.modules.movement;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -33,6 +34,9 @@ public class NoSlow extends Module {
         .description("Speed multiplier while using item (1.0 = full speed, 0.2 = vanilla slow). Tests partial NoSlow detection.")
         .defaultValue(1.0).range(0.2, 1.0).sliderRange(0.2, 1.0).build()
     );
+
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -56,17 +60,30 @@ public class NoSlow extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; obs.onActivate(); }
 
     @EventHandler
-    private void onTick(TickEvent.Pre event) { ticksActive++; }
+    private void onTick(TickEvent.Pre event) {
+        ticksActive++;
+        obs.tick();
+        // The exploit is live only while actually using an item and moving — open the window then.
+        if (mc.player != null && mc.player.isUsingItem()
+            && (mc.player.forwardSpeed != 0 || mc.player.sidewaysSpeed != 0)) obs.markSent();
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

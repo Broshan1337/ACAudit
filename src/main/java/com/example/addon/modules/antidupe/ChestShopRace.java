@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -48,6 +49,10 @@ public class ChestShopRace extends Module {
         .name("shop-slot").description("Slot to QUICK_MOVE in the shop GUI (e.g. buy-confirm slot).")
         .defaultValue(0).range(0, 53).sliderRange(0, 53).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -67,12 +72,16 @@ public class ChestShopRace extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; seq = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; seq = 0;
+        obs.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        obs.tick();
 
         // Spam block-use on the shop block in crosshair
         if (mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() != HitResult.Type.MISS) {
@@ -94,15 +103,21 @@ public class ChestShopRace extends Module {
             packetsSent++;
             }
         }
+        obs.markFired();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
+        obs.onReceive(event.packet);
         if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
         String text = msg.content().getString();
         if (!text.isBlank()) info("[Response] %s", text);
@@ -110,6 +125,7 @@ public class ChestShopRace extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

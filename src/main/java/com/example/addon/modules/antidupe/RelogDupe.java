@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -64,6 +65,10 @@ public class RelogDupe extends Module {
         .name("key").description("Press to run the action and disconnect.")
         .defaultValue(Keybind.fromKey(org.lwjgl.glfw.GLFW.GLFW_KEY_R)).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> showStats = sgGeneral.add(new BoolSetting.Builder()
         .name("show-stats").description("Print tick + packet count on deactivate.")
         .defaultValue(true).build()
@@ -82,6 +87,7 @@ public class RelogDupe extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; wasPressed = false; countdown = -1;
+        obs.onActivate(); preStress.onActivate(this);
         info("Tip: combine with gui-desync — hold GUI packets then trigger relog to race save-on-quit.");
     }
 
@@ -89,6 +95,7 @@ public class RelogDupe extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        obs.tick();
 
         if (countdown > 0) {
             countdown--;
@@ -102,6 +109,7 @@ public class RelogDupe extends Module {
         if (!fire) return;
 
         performAction();
+        obs.markFired();
         if (delay.get() <= 0) doDisconnect();
         else countdown = delay.get();
     }
@@ -130,11 +138,16 @@ public class RelogDupe extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
+        obs.onReceive(event.packet);
         if (actionType.get() != ActionType.COMMAND) return;
         if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
         String text = msg.content().getString();
@@ -143,6 +156,7 @@ public class RelogDupe extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (isActive()) toggle();
     }
 }

@@ -2,6 +2,7 @@ package com.example.addon.modules.movement;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -46,6 +47,24 @@ public class Speed extends Module {
         .name("only-on-ground").description("Only boost while on the ground.")
         .defaultValue(true).build()
     );
+    private final Setting<Boolean> adaptiveSeek = sgGeneral.add(new BoolSetting.Builder()
+        .name("adaptive-seek")
+        .description("Start near vanilla and raise speed every seek-interval until the server sets you back, then back off — finds the EXACT detection threshold instead of guessing.")
+        .defaultValue(false).build()
+    );
+    private final Setting<Double> seekStep = sgGeneral.add(new DoubleSetting.Builder()
+        .name("seek-step").description("Speed increment per interval while seeking (b/t).")
+        .defaultValue(0.02).range(0.005, 0.2).sliderRange(0.005, 0.1)
+        .visible(adaptiveSeek::get).build()
+    );
+    private final Setting<Integer> seekInterval = sgGeneral.add(new IntSetting.Builder()
+        .name("seek-interval").description("Ticks at each speed before stepping up.")
+        .defaultValue(20).range(2, 200).sliderRange(5, 80)
+        .visible(adaptiveSeek::get).build()
+    );
+
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -57,6 +76,9 @@ public class Speed extends Module {
 
     private int ticksActive = 0, packetsSent = 0;
     private double rampProgress = 0.0;
+    private double seekSpeed = 0.28;
+    private int seekTimer = 0, seekLastSetbacks = 0;
+    private boolean seekFound = false;
 
     public Speed() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "speed",
@@ -64,12 +86,17 @@ public class Speed extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; rampProgress = 0.0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; rampProgress = 0.0;
+        seekSpeed = 0.28; seekTimer = 0; seekLastSetbacks = 0; seekFound = false;
+        obs.onActivate();
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        obs.tick();
         if (onlyOnGround.get() && !mc.player.isOnGround()) return;
 
         float forward  = mc.player.forwardSpeed;
@@ -83,11 +110,27 @@ public class Speed extends Module {
         double sin = Math.sin(yaw), cos = Math.cos(yaw);
 
         double target = speed.get();
+        if (adaptiveSeek.get()) {
+            // Step the seek speed up until the server starts setting us back, then back off once.
+            if (!seekFound) {
+                if (obs.setbackCount() > seekLastSetbacks) {
+                    seekFound = true;
+                    seekSpeed = Math.max(0.28, seekSpeed - seekStep.get());
+                    info("Adaptive-seek: detection threshold ≈ %.3f b/t (backed off to %.3f).",
+                        seekSpeed + seekStep.get(), seekSpeed);
+                } else if (++seekTimer >= seekInterval.get()) {
+                    seekTimer = 0;
+                    seekSpeed += seekStep.get();
+                }
+                seekLastSetbacks = obs.setbackCount();
+            }
+            target = seekSpeed;
+        }
         double jit = jitterFactor.get() > 0 ? (Math.random() * 2 - 1) * jitterFactor.get() : 0;
         double effective = target * (1.0 + jit);
 
         int ramp = rampTicks.get();
-        if (ramp > 0) {
+        if (ramp > 0 && !adaptiveSeek.get()) {
             rampProgress = Math.min(1.0, rampProgress + 1.0 / ramp);
             double vanilla = 0.28;
             effective = vanilla + (effective - vanilla) * rampProgress;
@@ -98,15 +141,23 @@ public class Speed extends Module {
 
         Vec3d v = mc.player.getVelocity();
         mc.player.setVelocity(velX, v.y, velZ);
+        obs.markSent();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

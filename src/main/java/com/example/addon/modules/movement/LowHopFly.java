@@ -2,6 +2,7 @@ package com.example.addon.modules.movement;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -49,6 +50,9 @@ public class LowHopFly extends Module {
         .description("Skip position packet when X/Z hasn't changed since last tick. Mimics stationary player.")
         .defaultValue(false).build()
     );
+
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -72,12 +76,14 @@ public class LowHopFly extends Module {
         ticksActive = 0; packetsSent = 0;
         if (mc.player != null) targetY = mc.player.getY() + hoverHeight.get();
         lastX = Double.NaN; lastZ = Double.NaN;
+        obs.onActivate();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         ticksActive++;
+        obs.tick();
         mc.player.setVelocity(mc.player.getVelocity().x, 0.0, mc.player.getVelocity().z);
 
         double noise = surfaceNoise.get();
@@ -90,16 +96,24 @@ public class LowHopFly extends Module {
         mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
             cx, sendY, cz, true, mc.player.horizontalCollision));
         packetsSent++;
+        obs.markSent();
         lastX = cx; lastZ = cz;
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

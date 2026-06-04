@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -44,6 +45,10 @@ public class CrafterDupe extends Module {
         .description("QUICK_MOVE clicks on the output slot (slot 9) each tick. Tests output-grab vs. craft-step atomicity. Set 0 to disable.")
         .defaultValue(5).range(0, 50).sliderRange(0, 20).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -61,12 +66,16 @@ public class CrafterDupe extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0;
+        obs.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.player.currentScreenHandler == null) return;
         ticksActive++;
+        obs.tick();
         var handler = mc.player.currentScreenHandler;
         int syncId = handler.syncId;
         int rev = handler.getRevision();
@@ -84,15 +93,21 @@ public class CrafterDupe extends Module {
                 new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
             packetsSent++;
         }
+        obs.markFired();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
+        obs.onReceive(event.packet);
         if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
             info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
         else if (event.packet instanceof InventoryS2CPacket p)
@@ -101,6 +116,7 @@ public class CrafterDupe extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

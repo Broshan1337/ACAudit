@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -12,8 +13,6 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
-import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 import net.minecraft.util.hit.BlockHitResult;
@@ -71,6 +70,9 @@ public class ShulkerRace extends Module {
         .defaultValue(true).build()
     );
 
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private int ticksActive = 0, packetsSent = 0;
 
     private boolean wasPressed = false;
@@ -83,6 +85,7 @@ public class ShulkerRace extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; wasPressed = false;
+        obs.onActivate(); preStress.onActivate(this);
         info("Tip: combine with enderchest-desync for dimension-spanning shulker persistence test.");
     }
 
@@ -90,6 +93,7 @@ public class ShulkerRace extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         ticksActive++;
+        obs.tick();
         boolean p = key.get().isPressed();
         boolean fire = p && !wasPressed;
         wasPressed = p;
@@ -113,6 +117,7 @@ public class ShulkerRace extends Module {
             if (breakBlock.get()) breakAt(pos, dir);
             if (grab.get()) grabContents();
         }
+        obs.markFired();
         info("Shulker race fired (%s) at %s", order.get(), pos.toShortString());
     }
 
@@ -145,19 +150,19 @@ public class ShulkerRace extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
-    private void onReceivePacket(PacketEvent.Receive event) {
-        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
-            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
-        else if (event.packet instanceof InventoryS2CPacket p)
-            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
-    }
+    private void onReceivePacket(PacketEvent.Receive event) { obs.survey(event.packet, l -> info("%s", l)); }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

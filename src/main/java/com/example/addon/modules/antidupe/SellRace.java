@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -49,9 +50,13 @@ public class SellRace extends Module {
     );
     private final Setting<Integer> delayTicks = sgGeneral.add(new IntSetting.Builder()
         .name("delay-ticks")
-        .description("Ticks between bursts (lets balance/inventory settle so you can read the result).")
+        .description("Ticks between bursts (lets balance/inventory settle so you can read the result). Set burst=1 for a single-snipe TOCTOU test.")
         .defaultValue(40).range(1, 200).sliderRange(5, 100).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -71,19 +76,23 @@ public class SellRace extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; fired = 0; timer = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; fired = 0; timer = 0;
+        obs.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        obs.tick();
         if (timer > 0) { timer--; return; }
 
         for (int i = 0; i < burst.get(); i++) {
             mc.player.networkHandler.sendChatCommand(command.get());
-        packetsSent++;
-
+            packetsSent++;
         }
+        obs.markFired();
         fired++;
         info("Burst %d/%d sent (%dx '%s')", fired, attempts.get(), burst.get(), command.get());
         timer = delayTicks.get();
@@ -92,11 +101,16 @@ public class SellRace extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
+        obs.onReceive(event.packet);
         if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
         String text = msg.content().getString();
         if (!text.isBlank()) info("[Response] %s", text);
@@ -104,6 +118,7 @@ public class SellRace extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

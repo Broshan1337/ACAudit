@@ -56,6 +56,13 @@ public class PingSpoof extends Module {
         .description("Delay increases by this many ms per KeepAlive sent. Tests dynamic tolerance adaptation.")
         .defaultValue(0).range(0, 5000).sliderRange(0, 1000).build()
     );
+
+    // Because PingSpoof delays ONLY KeepAlive (not movement), it already creates a
+    // keepalive-RTT-vs-movement-timing divergence; realistic-latency makes that
+    // divergence look organic to probe whether the AC trusts it more.
+    private final LatencyModel latency = new LatencyModel(sgGeneral);
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -67,6 +74,7 @@ public class PingSpoof extends Module {
 
     private int ticksActive = 0, packetsSent = 0;
     private long keepAliveCount = 0;
+    private long activatedAt = 0;
 
     private record Held(Packet<?> packet, long releaseAt) {}
     private final Deque<Held> queue = new ArrayDeque<>();
@@ -78,11 +86,14 @@ public class PingSpoof extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; queue.clear(); keepAliveCount = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; queue.clear(); keepAliveCount = 0; activatedAt = System.currentTimeMillis(); obs.onActivate(); }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
         releaseAll();
     }
 
@@ -91,17 +102,26 @@ public class PingSpoof extends Module {
         if (!(event.packet instanceof KeepAliveC2SPacket)) return;
         lastEvent = event;
         long base = maxWindow.get() ? 29000L : delayMs.get();
-        long jit = jitterMs.get() > 0 ? (long) ((Math.random() * 2 - 1) * jitterMs.get()) : 0;
-        long esc = keepAliveCount * escalateStep.get();
-        long delay = base + jit + esc;
+        long delay;
+        if (latency.realistic()) {
+            delay = latency.nextDelayMs(base, System.currentTimeMillis() - activatedAt);
+        } else {
+            long jit = jitterMs.get() > 0 ? (long) ((Math.random() * 2 - 1) * jitterMs.get()) : 0;
+            long esc = keepAliveCount * escalateStep.get();
+            delay = base + jit + esc;
+        }
         keepAliveCount++;
         queue.add(new Held(event.packet, System.currentTimeMillis() + delay));
         event.cancel();
     }
 
     @EventHandler
+    private void onReceive(PacketEvent.Receive event) { obs.onReceive(event.packet); }
+
+    @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;
+        obs.tick();
         long now = System.currentTimeMillis();
         while (!queue.isEmpty() && queue.peek().releaseAt() <= now) {
             Packet<?> p = queue.poll().packet();
@@ -120,6 +140,7 @@ public class PingSpoof extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

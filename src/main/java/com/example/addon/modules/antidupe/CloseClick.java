@@ -1,8 +1,10 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -55,6 +57,10 @@ public class CloseClick extends Module {
         .name("key").description("Fires one close+click sequence.")
         .defaultValue(Keybind.fromKey(org.lwjgl.glfw.GLFW.GLFW_KEY_M)).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -74,12 +80,16 @@ public class CloseClick extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; wasPressed = false;
+        obs.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.player.currentScreenHandler == null) return;
         ticksActive++;
+        obs.tick();
         boolean p = key.get().isPressed();
         boolean fire = p && !wasPressed;
         wasPressed = p;
@@ -113,16 +123,25 @@ public class CloseClick extends Module {
             mc.player.networkHandler.sendPacket(close);
             packetsSent++;
         }
+        obs.markFired();
         info("Sent %s x%d %s on slot %d (syncId %d)", order.get(), burst.get(), action.get(), slot.get(), syncId);
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.survey(event.packet, l -> info("%s", l)); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

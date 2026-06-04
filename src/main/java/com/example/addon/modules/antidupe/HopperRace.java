@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -49,6 +50,10 @@ public class HopperRace extends Module {
         .name("phase-offset").description("Align burst to hopper's 8-tick cycle. Tune 0–7 to compensate latency.")
         .defaultValue(0).range(0, 7).sliderRange(0, 7).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -67,12 +72,16 @@ public class HopperRace extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; hopperTick = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; hopperTick = 0;
+        obs.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;
         hopperTick++;
+        obs.tick();
         if (mc.player == null || mc.player.currentScreenHandler == null
             || mc.player.currentScreenHandler == mc.player.playerScreenHandler) {
             if (isActive()) warning("Open a hopper GUI first.");
@@ -95,15 +104,21 @@ public class HopperRace extends Module {
                 new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
             packetsSent++;
         }
+        obs.markFired();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
+        obs.onReceive(event.packet);
         if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
             info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
         else if (event.packet instanceof InventoryS2CPacket p)
@@ -112,6 +127,7 @@ public class HopperRace extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

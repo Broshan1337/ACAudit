@@ -2,6 +2,7 @@ package com.example.addon.modules.movement;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -50,6 +51,19 @@ public class ResetVL extends Module {
         .name("inter-hop-wait").description("Ticks to wait between hops. Tests spaced filler detection.")
         .defaultValue(0).range(0, 10).sliderRange(0, 8).build()
     );
+    private final Setting<Boolean> interleaveViolation = sgGeneral.add(new BoolSetting.Builder()
+        .name("interleave-violation")
+        .description("Slip one deliberately-too-high hop in among the clean filler every N hops, and let the observer report whether the VL decayed faster than it accrued (i.e. the violation never gets punished).")
+        .defaultValue(false).build()
+    );
+    private final Setting<Integer> cleanPerViolation = sgGeneral.add(new IntSetting.Builder()
+        .name("clean-per-violation").description("Clean filler hops between each interleaved violation.")
+        .defaultValue(5).range(1, 50).sliderRange(1, 20)
+        .visible(interleaveViolation::get).build()
+    );
+
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -69,12 +83,16 @@ public class ResetVL extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; done = 0; hopWaitCounter = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; done = 0; hopWaitCounter = 0;
+        obs.onActivate();
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        obs.tick();
 
         if (mc.player.isOnGround()) {
             if (hopWaitCounter > 0) { hopWaitCounter--; return; }
@@ -84,7 +102,16 @@ public class ResetVL extends Module {
             double dz = drift > 0 ? (Math.random() * 2 - 1) * drift : 0;
             double jit = hopJitter.get() > 0 ? (Math.random() * 2 - 1) * hopJitter.get() : 0;
             double vel = Math.max(0.05, 0.1 + jit);
+            // Every Nth hop, slip in a deliberately-too-high hop as the interleaved violation.
+            boolean violation = interleaveViolation.get() && cleanPerViolation.get() > 0
+                && done > 0 && done % cleanPerViolation.get() == 0;
+            if (violation) {
+                vel = 0.42 + jit;           // an obvious over-jump amid the clean filler
+                dx = drift > 0 ? dx * 4 : 0.3;
+                obs.markSent();
+            }
             mc.player.setVelocity(dx, vel, dz);
+            if (violation) info("Interleaved violation hop #%d (watching if VL ever flags it).", done);
             hopWaitCounter = interHopWait.get();
             done++;
             if (done >= hops.get()) toggle();
@@ -95,11 +122,18 @@ public class ResetVL extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

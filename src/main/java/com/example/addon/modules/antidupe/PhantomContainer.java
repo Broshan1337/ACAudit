@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -53,6 +54,10 @@ public class PhantomContainer extends Module {
         .defaultValue(meteordevelopment.meteorclient.utils.misc.Keybind.fromKey(org.lwjgl.glfw.GLFW.GLFW_KEY_P))
         .visible(() -> trigger.get() == Trigger.KEYBIND).build()
     );
+
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final DupeObserver obs = new DupeObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -74,6 +79,7 @@ public class PhantomContainer extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; wasPressed = false;
+        obs.onActivate(); preStress.onActivate(this);
         info("Tip: combine with slot-exploit — try OOB slot indices on the phantom syncId for a compound attack.");
     }
 
@@ -82,6 +88,7 @@ public class PhantomContainer extends Module {
         if (mc.player == null || mc.player.currentScreenHandler == null
             || mc.player.currentScreenHandler == mc.player.playerScreenHandler) return;
         ticksActive++;
+        obs.tick();
 
         boolean fire;
         if (trigger.get() == Trigger.EACH_TICK) fire = true;
@@ -103,15 +110,21 @@ public class PhantomContainer extends Module {
                 new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
             packetsSent++;
         }
+        obs.markFired();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
+        obs.onReceive(event.packet);
         if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
             info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
         else if (event.packet instanceof InventoryS2CPacket p)
@@ -120,6 +133,7 @@ public class PhantomContainer extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

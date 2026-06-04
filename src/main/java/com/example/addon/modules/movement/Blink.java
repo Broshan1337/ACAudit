@@ -68,6 +68,8 @@ public class Blink extends Module {
         .description("Spread flushed packets across this many ticks (0 = instant burst). Simulates realistic network recovery.")
         .defaultValue(0).range(0, 10).sliderRange(0, 5).build()
     );
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable (and flush) when kicked from the server.")
         .defaultValue(true).build()
@@ -97,17 +99,22 @@ public class Blink extends Module {
         queue.clear(); flushQueue.clear();
         heldTicks = 0;
         targetHold = computeTarget();
+        obs.onActivate();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
         flush();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;
+        obs.tick();
 
         // Drain spread flush queue
         if (!flushQueue.isEmpty()) {
@@ -147,6 +154,7 @@ public class Blink extends Module {
         queue.clear();
         heldTicks = 0;
         targetHold = computeTarget();
+        obs.markSent();
     }
 
     private void sendPacket(Packet<?> p) {
@@ -161,7 +169,11 @@ public class Blink extends Module {
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

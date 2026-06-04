@@ -7,6 +7,7 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 
@@ -58,6 +59,11 @@ public class AntiSetback extends Module {
         .defaultValue(0).range(0, 10).sliderRange(0, 5)
         .visible(sendConfirm::get).build()
     );
+    private final Setting<Boolean> reassertPosition = sgGeneral.add(new BoolSetting.Builder()
+        .name("reassert-position")
+        .description("After rejecting a setback, actively re-send the PRE-setback position so the server's model stays inconsistent. Probes whether later moves are validated against the corrected model or the stale one we re-asserted.")
+        .defaultValue(false).build()
+    );
     private final Setting<Boolean> notify = sgGeneral.add(new BoolSetting.Builder()
         .name("notify").description("Log each setback packet that gets rejected.")
         .defaultValue(true).build()
@@ -77,17 +83,20 @@ public class AntiSetback extends Module {
     private record PendingConfirm(int teleportId, int sendAt) {}
     private final Deque<PendingConfirm> pendingConfirms = new ArrayDeque<>();
 
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     public AntiSetback() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "anti-setback",
             "Rejects / spoofs server position-corrections. Tests whether AC enforcement survives a non-cooperative client.");
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; received = 0; pendingConfirms.clear(); }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; received = 0; pendingConfirms.clear(); obs.onActivate(); }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         ticksActive++;
+        obs.tick();
         if (mc.player == null || pendingConfirms.isEmpty()) return;
         while (!pendingConfirms.isEmpty() && pendingConfirms.peek().sendAt() <= ticksActive) {
             int id = pendingConfirms.poll().teleportId();
@@ -98,6 +107,7 @@ public class AntiSetback extends Module {
 
     @EventHandler
     private void onReceive(PacketEvent.Receive event) {
+        obs.onReceive(event.packet);
         if (!(event.packet instanceof PlayerPositionLookS2CPacket packet)) return;
         received++;
 
@@ -108,6 +118,14 @@ public class AntiSetback extends Module {
         }
 
         event.cancel();
+        obs.markSent();
+
+        // Actively re-assert the stale (pre-setback) position so the server model stays inconsistent.
+        if (reassertPosition.get() && mc.player != null) {
+            mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
+                mc.player.getX(), mc.player.getY(), mc.player.getZ(), mc.player.isOnGround(), false));
+            packetsSent++;
+        }
 
         if (sendConfirm.get()) {
             int delay = confirmDelay.get();
@@ -129,11 +147,15 @@ public class AntiSetback extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

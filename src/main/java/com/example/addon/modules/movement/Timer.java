@@ -2,6 +2,7 @@ package com.example.addon.modules.movement;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -48,6 +49,19 @@ public class Timer extends Module {
         .defaultValue(40).range(1, 200).sliderRange(1, 80)
         .visible(burstMode::get).build()
     );
+    private final Setting<Boolean> driftMode = sgGeneral.add(new BoolSetting.Builder()
+        .name("clock-drift")
+        .description("Ignore multiplier and run a tiny sustained clock drift (sub-1%) instead. Undetectable per tick but accumulates to a large position error over a minute — tests long-window wall-clock validation.")
+        .defaultValue(false).build()
+    );
+    private final Setting<Double> driftPercent = sgGeneral.add(new DoubleSetting.Builder()
+        .name("drift-percent").description("How much faster than real time, in percent (0.1 = 0.1% ≈ undetectable per tick).")
+        .defaultValue(0.1).range(0.01, 5.0).sliderRange(0.01, 1.0)
+        .visible(driftMode::get).build()
+    );
+
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -67,6 +81,7 @@ public class Timer extends Module {
     /** Read by TimerMixin. Returns 1.0 when inactive so the mixin is a no-op. */
     public float getMultiplier() {
         if (!isActive()) return 1.0f;
+        if (driftMode.get()) return (float) (1.0 + driftPercent.get() / 100.0);
         if (burstMode.get()) {
             int bt = burstTicks.get(), rt = restTicks.get();
             int cycle = bt + rt;
@@ -78,17 +93,24 @@ public class Timer extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+    public void onActivate() { ticksActive = 0; packetsSent = 0; obs.onActivate(); }
 
     @EventHandler
-    private void onTick(TickEvent.Pre event) { ticksActive++; }
+    private void onTick(TickEvent.Pre event) { ticksActive++; obs.tick(); }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

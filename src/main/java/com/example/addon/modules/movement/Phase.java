@@ -2,6 +2,7 @@ package com.example.addon.modules.movement;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -53,10 +54,18 @@ public class Phase extends Module {
         .description("Random ±degrees of yaw applied per packet. Mimics micro-input changes during phasing.")
         .defaultValue(0.5).range(0.0, 5.0).sliderRange(0.0, 3.0).build()
     );
+    private final Setting<Boolean> clampLegalSteps = sgGeneral.add(new BoolSetting.Builder()
+        .name("clamp-legal-steps")
+        .description("Clamp every step to ≤ a legal single-move distance so the probe is unambiguously 'each delta legal, the summed path crosses solid' — the pure collision-path-continuity test.")
+        .defaultValue(true).build()
+    );
     private final Setting<Keybind> key = sgGeneral.add(new KeybindSetting.Builder()
         .name("key").description("Press to phase forward.")
         .defaultValue(Keybind.fromKey(org.lwjgl.glfw.GLFW.GLFW_KEY_G)).build()
     );
+
+    private final MovementObserver obs = new MovementObserver(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -75,12 +84,16 @@ public class Phase extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; wasPressed = false;
+        obs.onActivate();
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        obs.tick();
         boolean p = key.get().isPressed();
         boolean fire = p && !wasPressed;
         wasPressed = p;
@@ -96,6 +109,7 @@ public class Phase extends Module {
             double effectiveStep = variance > 0
                 ? baseStep * (1.0 + (Math.random() * 2 - 1) * variance)
                 : baseStep;
+            if (clampLegalSteps.get()) effectiveStep = Math.min(effectiveStep, 0.29); // keep each delta legal
             double packetYaw = Math.toRadians(mc.player.getYaw()
                 + (drift > 0 ? (Math.random() * 2 - 1) * drift : 0));
             x += -Math.sin(packetYaw) * effectiveStep;
@@ -106,16 +120,24 @@ public class Phase extends Module {
         }
 
         mc.player.setPosition(x, y, z);
+        obs.markSent();
         info("Phased %.1f blocks.", distance.get());
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

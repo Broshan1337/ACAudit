@@ -1,6 +1,7 @@
 package com.example.addon.modules.antidupe;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.crash.PreStress;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -10,8 +11,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
-import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
-import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
 
@@ -93,6 +92,9 @@ public class ManualClick extends Module {
         .defaultValue(true).build()
     );
 
+    private final PreStress preStress = new PreStress(sgFire);
+    private final DupeObserver obs = new DupeObserver(sgFire);
+
     private int ticksActive = 0, packetsSent = 0;
 
     private boolean wasPressed = false;
@@ -103,7 +105,10 @@ public class ManualClick extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; wasPressed = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; wasPressed = false;
+        obs.onActivate(); preStress.onActivate(this);
+    }
 
     private SlotActionType resolveAction() {
         return switch (action.get()) {
@@ -121,6 +126,7 @@ public class ManualClick extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        obs.tick();
 
         boolean fire;
         if (trigger.get() == Trigger.EACH_TICK) {
@@ -150,25 +156,26 @@ public class ManualClick extends Module {
                 new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
             packetsSent++;
         }
+        obs.markFired();
         info("Sent %dx click → syncId %d rev %d slot %d button %d %s",
             count.get(), syncId, revision, slot.get(), button.get(), action.get());
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            obs.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
-    private void onReceivePacket(PacketEvent.Receive event) {
-        if (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket p)
-            info("Server updated slot %d → %s (syncId %d)", p.getSlot(), p.getStack().getName().getString(), p.getSyncId());
-        else if (event.packet instanceof InventoryS2CPacket p)
-            info("Server resynced inventory (syncId %d, %d slots)", p.syncId(), p.contents().size());
-    }
+    private void onReceivePacket(PacketEvent.Receive event) { obs.survey(event.packet, l -> info("%s", l)); }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        obs.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }
