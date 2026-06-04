@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -57,6 +58,10 @@ public class PassengerLoop extends Module {
         .defaultValue(true).build()
     );
 
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private int ticksActive = 0, packetsSent = 0;
 
     public PassengerLoop() {
@@ -67,6 +72,7 @@ public class PassengerLoop extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
         if (autoMonitor.get()) {
             var shm = Modules.get().get(ServerHealthMonitor.class);
             if (shm != null && !shm.isActive()) shm.toggle();
@@ -77,6 +83,8 @@ public class PassengerLoop extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
 
         Entity looked = (mc.crosshairTarget instanceof EntityHitResult ehr) ? ehr.getEntity() : null;
         Entity vehicle = includeVehicle.get() ? mc.player.getVehicle() : null;
@@ -92,15 +100,25 @@ public class PassengerLoop extends Module {
                     PlayerInteractEntityC2SPacket.interact(vehicle, mc.player.isSneaking(), Hand.MAIN_HAND));
             packetsSent++;
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            gr.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

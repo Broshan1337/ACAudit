@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -45,6 +46,11 @@ public class ExtremeVelocity extends Module {
         .name("packets-per-tick").description("Position packets per tick.")
         .defaultValue(1).range(1, 20).sliderRange(1, 10).build()
     );
+
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -55,7 +61,6 @@ public class ExtremeVelocity extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
-    private boolean kicked = false;
 
     private double accumX = 0;
 
@@ -65,7 +70,9 @@ public class ExtremeVelocity extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; kicked = false;
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
         if (mc.player != null) accumX = mc.player.getX();
     }
 
@@ -73,6 +80,8 @@ public class ExtremeVelocity extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
         double step = distancePerTick.get() / packetsPerTick.get();
         double y = mc.player.getY(), z = mc.player.getZ();
         for (int i = 0; i < packetsPerTick.get(); i++) {
@@ -81,19 +90,25 @@ public class ExtremeVelocity extends Module {
                 accumX, y, z, true, false));
             packetsSent++;
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     @Override
     public void onDeactivate() {
         if (showStats.get()) {
             info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
-            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+            gr.report(l -> info("%s", l));
         }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
-        kicked = true;
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

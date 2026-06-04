@@ -3,6 +3,7 @@ package com.example.addon.modules.crash;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -56,6 +57,11 @@ public class PacketOrderChaos extends Module {
         .name("swing-before-attack").description("Swing arm packet interleaved at wrong times (high rate).")
         .defaultValue(true).build()
     );
+
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -75,12 +81,17 @@ public class PacketOrderChaos extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; fakeSyncId = 99; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; fakeSyncId = 99;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
 
         for (int i = 0; i < perTick.get(); i++) {
             fakeSyncId = (fakeSyncId + 7) % 127 + 1; // cycle through 1-127
@@ -114,15 +125,25 @@ public class PacketOrderChaos extends Module {
             packetsSent++;
             }
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            gr.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

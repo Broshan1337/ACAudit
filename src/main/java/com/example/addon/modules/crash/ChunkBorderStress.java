@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -46,6 +47,11 @@ public class ChunkBorderStress extends Module {
         .name("boundary-offset").description("Blocks either side of the chunk edge to ping-pong between.")
         .defaultValue(1.0).range(0.1, 8.0).sliderRange(0.1, 4.0).build()
     );
+
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -73,6 +79,7 @@ public class ChunkBorderStress extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; currentRate = 1; side = false;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
         if (autoMonitor.get()) {
             var shm = Modules.get().get(ServerHealthMonitor.class);
             if (shm != null && !shm.isActive()) shm.toggle();
@@ -83,6 +90,8 @@ public class ChunkBorderStress extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
         int rate = rampMode.get() ? currentRate : crossingsPerTick.get();
         if (rampMode.get()) currentRate += rampStep.get();
 
@@ -98,6 +107,8 @@ public class ChunkBorderStress extends Module {
                 x, y, z, true, false));
             packetsSent++;
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     @Override
@@ -105,11 +116,17 @@ public class ChunkBorderStress extends Module {
         if (showStats.get()) {
             info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
             if (rampMode.get()) info("  Ramp: peak rate sent was %d/tick", currentRate - rampStep.get());
+            gr.report(l -> info("%s", l));
         }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

@@ -57,6 +57,7 @@ public class SellCommandFuzz extends Module {
         .name("show-stats").description("Print tick + packet count on deactivate.")
         .defaultValue(true).build()
     );
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
     private int ticksActive = 0, packetsSent = 0;
 
     private int index = 0;
@@ -72,12 +73,14 @@ public class SellCommandFuzz extends Module {
     public void onActivate() { ticksActive = 0; packetsSent = 0;
         index = 0;
         timer = 0;
+        gr.onActivate();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
         if (timer > 0) { timer--; return; }
         lastFuzzValue = FUZZ_VALUES[index % FUZZ_VALUES.length];
         mc.player.networkHandler.sendChatCommand("sell " + lastFuzzValue);
@@ -90,11 +93,15 @@ public class SellCommandFuzz extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            gr.report(l -> info("%s", l));
+        }
     }
 
     @EventHandler
     private void onReceivePacket(PacketEvent.Receive event) {
+        gr.onReceive(event.packet);
         if (!(event.packet instanceof GameMessageS2CPacket msg)) return;
         String text = msg.content().getString();
         if (!text.isBlank()) info("[Response to '%s'] %s", lastFuzzValue, text);
@@ -102,6 +109,7 @@ public class SellCommandFuzz extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

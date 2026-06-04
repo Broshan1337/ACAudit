@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -56,6 +57,10 @@ public class PortalSpam extends Module {
         .defaultValue(true).build()
     );
 
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private int ticksActive = 0, packetsSent = 0;
 
     private int seq = 0;
@@ -68,6 +73,7 @@ public class PortalSpam extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; seq = 0;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
         if (autoMonitor.get()) {
             var shm = Modules.get().get(ServerHealthMonitor.class);
             if (shm != null && !shm.isActive()) shm.toggle();
@@ -78,6 +84,8 @@ public class PortalSpam extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
         if (!(mc.crosshairTarget instanceof BlockHitResult hit) || hit.getType() == HitResult.Type.MISS) {
             warning("Look at a portal block.");
             return;
@@ -94,15 +102,25 @@ public class PortalSpam extends Module {
                 center.x, center.y, center.z, false, false));
             packetsSent++;
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            gr.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

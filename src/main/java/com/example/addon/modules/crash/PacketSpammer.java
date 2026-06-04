@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -66,6 +67,10 @@ public class PacketSpammer extends Module {
         .defaultValue(true).build()
     );
 
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private int ticksActive = 0, packetsSent = 0;
     private int currentRate = 1;
 
@@ -77,6 +82,7 @@ public class PacketSpammer extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; currentRate = 1;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
         if (autoMonitor.get()) {
             var shm = Modules.get().get(ServerHealthMonitor.class);
             if (shm != null && !shm.isActive()) shm.toggle();
@@ -87,6 +93,8 @@ public class PacketSpammer extends Module {
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
         int rate = rampMode.get() ? currentRate : amount.get();
         if (rampMode.get()) currentRate += rampStep.get();
         for (int i = 0; i < rate; i++) {
@@ -95,6 +103,7 @@ public class PacketSpammer extends Module {
             mc.player.networkHandler.sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
             packetsSent++;
         }
+        gr.markFired();
     }
 
     @Override
@@ -102,11 +111,17 @@ public class PacketSpammer extends Module {
         if (showStats.get()) {
             info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
             if (rampMode.get()) info("  Ramp: peak rate sent was %d/tick", currentRate - rampStep.get());
+            gr.report(l -> info("%s", l));
         }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

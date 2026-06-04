@@ -4,7 +4,9 @@ import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.OpenScreenEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screen.ingame.LecternScreen;
@@ -33,8 +35,10 @@ import net.minecraft.screen.sync.ItemStackHash;
  * Open a lectern, enable, then interact with the lectern.
  */
 public class LecternCrash extends Module {
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private boolean fired = false;
-    private boolean kicked = false;
     private int waitTicks = 0;
 
     public LecternCrash() {
@@ -45,8 +49,8 @@ public class LecternCrash extends Module {
     @Override
     public void onActivate() {
         fired = false;
-        kicked = false;
         waitTicks = 0;
+        gr.onActivate();
     }
 
     @EventHandler
@@ -57,24 +61,29 @@ public class LecternCrash extends Module {
             mc.player.currentScreenHandler.syncId, mc.player.currentScreenHandler.getRevision(),
             (short) 0, (byte) 0, SlotActionType.QUICK_MOVE,
             new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
+        gr.markFired();
         fired = true;
         waitTicks = 40;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        gr.tick();
         if (!fired) return;
         waitTicks--;
         if (waitTicks <= 0) {
-            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+            gr.report(l -> info("%s", l));
             toggle();
         }
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
-        kicked = true;
-        info("  Server kicked: YES — rejection detected");
+        gr.onKick();
+        gr.report(l -> info("%s", l));
         if (isActive()) toggle();
     }
 }

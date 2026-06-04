@@ -2,6 +2,7 @@ package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -56,6 +57,11 @@ public class FastMine extends Module {
         .name("swing").description("Swing the hand each cycle (looks more legitimate).")
         .defaultValue(true).build()
     );
+
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -75,14 +81,19 @@ public class FastMine extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; timer = 0; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0; timer = 0;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         ticksActive++;
+        gr.tick();
         if (!(mc.crosshairTarget instanceof BlockHitResult hit)) return;
         if (timer > 0) { timer--; return; }
+        if (!cadence.shouldFire()) return;
 
         BlockPos pos = hit.getBlockPos();
         Direction dir = hit.getSide();
@@ -96,16 +107,26 @@ public class FastMine extends Module {
             packetsSent++;
             if (swing.get()) mc.player.swingHand(net.minecraft.util.Hand.MAIN_HAND);
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
         timer = tickDelay.get();
     }
 
     @Override
     public void onDeactivate() {
-        if (showStats.get()) info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+        if (showStats.get()) {
+            info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
+            gr.report(l -> info("%s", l));
+        }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }

