@@ -24,6 +24,10 @@ dependencies {
     mappings(variantOf(libs.yarn) { classifier("v2") })
     modImplementation(libs.fabric.loader)
     modImplementation(libs.meteor.client)
+    // Networking API: lets channel-flood register an outbound custom-payload type
+    // (PayloadTypeRegistry). Already resolved transitively via Meteor at runtime;
+    // declared here so it is on the compile classpath too.
+    modImplementation("net.fabricmc.fabric-api:fabric-networking-api-v1:5.1.4+4ebb5c0853")
 }
 
 tasks {

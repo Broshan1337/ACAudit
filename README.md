@@ -58,7 +58,28 @@ Tests whether your AC catches illegal movement and, crucially, whether a cheater
 | `vehicle-move` | flies/speeds the ridden vehicle via `VehicleMoveC2SPacket` — whether vehicle movement gets the same authority as player movement (boat-fly/boat-speed blind spot) |
 | `elytra-exploit` | overrides glide velocity to a fixed speed (firework-boost spoof) — server-side elytra speed envelope |
 | `riptide-launch` | imparts a riptide-magnitude impulse while dry — whether riptide velocity is gated on the water/rain precondition |
-| `phase` | walks reported position through blocks then snaps across — move-continuity / collision validation |
+| `phase` | walks reported position through blocks then snaps across — move-continuity / collision validation (`clamp-legal-steps` makes it the pure "each delta legal, summed path crosses solid" test) |
+
+#### Deep-coverage probes — physics, AC-model, and intent
+
+A basic anti-cheat **measures values**; a good one **models physics**; a great one **models intent**. These vectors target the gap between those layers: movement that looks legitimate in every individual packet but could never have been produced by a real player in a real physics simulation. Every probe is graded by a shared **`MovementObserver`** that reports what the server actually did — **setback** (caught it), **silent-accept** (didn't model it — the dangerous case), or **kick** — plus correction magnitude and min-TPS, so a pass means the AC genuinely modeled the exploit, not that it caught the obvious case.
+
+| Module | Tests |
+|---|---|
+| `momentum-break` | a move sequence with legal per-step speed but impossible acceleration between steps — whether the AC models **acceleration**, not just speed |
+| `ground-state-forge` | `onGround` transitions inconsistent with the Y-trajectory (fake-landing / no-approach / flicker) — whether the AC **derives** ground state instead of trusting the client bit |
+| `jump-arc-forge` | a jump with correct peak height but physically wrong arc shape/timing/symmetry — whether the AC validates the **whole trajectory** against gravity |
+| `model-drift` | a tiny constant sub-threshold position bias every tick — whether the AC bounds **cumulative** drift or only per-tick error |
+| `block-update-race` | a block place/break and a move on the same tick — whether movement validates against a **consistent world snapshot** |
+| `chunk-edge-move` | oscillates across the nearest chunk seam with borderline steps — a **validation gap at chunk boundaries** |
+| `legit-velocity-launder` | latches a legitimate velocity source (KB/ice/current/piston) and retains it past natural decay — whether the AC models velocity **decay**, not just its source (also the ice false-positive test) |
+| `physics-anomaly` | 7 borrowed-physics trajectories (gravity / step-stack / swim / slow-fall / levitation / vehicle / scaffold) the player isn't actually in — **state-gated** physics validation |
+| `transaction-timing` | delays ping/transaction Pong replies independently of movement timing — whether transaction-RTT leniency can be **desynced** from real movement timing |
+| `state-machine-fuzz` | cycles ground/air transitions faster than the jump cooldown allows, each transition individually valid — **transition-rate** limiting |
+| `packet-order-skew` | reorders the tick's move and action packets (action-first / interleaved) — whether the AC assumes a fixed **per-tick packet order** |
+| `combat-state-probe` | one attack while in an impossible movement state (jump apex / fast move / sprint desync) — **combat↔movement state sharing** (a minimal probe, not a kill-aura) |
+
+Several existing modules also gained deep-coverage modes: `speed` (`adaptive-seek` finds the exact detection threshold), `ac-high-jump` (ramp + observer = adaptive threshold-seeking), `ac-timer` (`clock-drift`: an undetectable sub-1% sustained drift that accumulates over a minute), `reset-vl` (`interleave-violation`: slips a real violation among the filler and reports whether VL ever flags it), `anti-setback` (`reassert-position`: leaves the AC's model inconsistent), `elytra-exploit` (`transition-carry`: carries glide momentum into on-foot movement), and `ping-spoof` (`realistic-latency`: organic jitter/spikes/drift instead of a flat delay).
 
 ###  AuditAC-Dupe — duplication & economy probes
 Tests inventory/container atomicity and economy-plugin input handling.
