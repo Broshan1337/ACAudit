@@ -101,7 +101,7 @@ public class MovementCrash extends Module {
 
     public MovementCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "movement-crash",
-            "Floods jittered moves OR walks an almost-legal impossible speed. Tests rate limiting and inter-tick continuity.");
+            "Floods jittered moves OR walks an almost-legal impossible speed. Tests rate limiting and inter-tick continuity. WARNING: heavy load; run crash modules LAST.");
     }
 
     @Override

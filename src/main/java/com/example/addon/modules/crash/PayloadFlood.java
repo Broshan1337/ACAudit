@@ -84,7 +84,7 @@ public class PayloadFlood extends Module {
 
     public PayloadFlood() {
         super(AddonTemplate.CRASH_CATEGORY, "payload-flood",
-            "Alternates oversized book and sign packets. Stress-tests server payload size limits.");
+            "Alternates oversized book and sign packets. Stress-tests server payload size limits. WARNING: high server impact; can kick/lag even locally.");
     }
 
     @Override

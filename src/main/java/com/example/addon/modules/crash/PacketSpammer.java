@@ -76,7 +76,7 @@ public class PacketSpammer extends Module {
 
     public PacketSpammer() {
         super(AddonTemplate.CRASH_CATEGORY, "packet-spammer",
-            "Spams onGround + swing packets to test raw inbound packet rate limiting.");
+            "Spams onGround + swing packets to test raw inbound packet rate limiting. WARNING: heavy packet load; can trip the packet-limiter / lag a local server.");
     }
 
     @Override

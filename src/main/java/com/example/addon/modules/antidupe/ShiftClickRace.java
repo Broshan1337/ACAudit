@@ -79,7 +79,7 @@ public class ShiftClickRace extends Module {
 
     public ShiftClickRace() {
         super(AddonTemplate.DUPE_CATEGORY, "shift-click-race",
-            "Same-tick QUICK_MOVE burst across a slot range. Tests QUICK_MOVE destination-search atomicity.");
+            "Same-tick QUICK_MOVE burst across a slot range. Tests QUICK_MOVE destination-search atomicity. COMBINE WITH a lag inducer (packet-spammer) to widen the race window.");
     }
 
     @Override

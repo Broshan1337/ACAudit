@@ -85,4 +85,13 @@ public class ServerHealthMonitor extends Module {
 
     /** True if we've seen at least one time-update interval (estimate is warm). */
     public boolean isWarm() { return lastTimePacketMs != 0; }
+
+    /**
+     * Milliseconds since the last server time-update packet, or -1 if none seen.
+     * A long gap while still connected indicates a server HANG (the main thread
+     * stopped ticking) rather than a clean crash or a recoverable lag spike.
+     */
+    public long msSinceLastSample() {
+        return lastTimePacketMs == 0 ? -1 : System.currentTimeMillis() - lastTimePacketMs;
+    }
 }

@@ -82,7 +82,7 @@ public class NbtBomb extends Module {
 
     public NbtBomb() {
         super(AddonTemplate.CRASH_CATEGORY, "nbt-bomb",
-            "Sends pathological NBT (deep compound / deep list / wide fan-out) via creative slot packet. Requires creative mode.");
+            "Sends pathological NBT (deep compound / deep list / wide fan-out) via creative slot packet. Requires creative mode. WARNING: can hard-crash or kick even a local server.");
     }
 
     @Override

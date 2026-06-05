@@ -176,7 +176,7 @@ public final class DupeObserver {
         if (h == null) return m;
         for (int i = 0; i < h.slots.size(); i++) {
             ItemStack s = h.slots.get(i).getStack();
-            if (!s.isEmpty()) m.merge(s.getItem(), s.getCount(), Integer::sum);
+            if (!s.isEmpty()) m.put(s.getItem(), m.getOrDefault(s.getItem(), 0) + s.getCount());
         }
         return m;
     }
