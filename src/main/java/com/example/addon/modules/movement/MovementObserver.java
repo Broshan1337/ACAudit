@@ -52,6 +52,7 @@ public final class MovementObserver {
 
     private final Setting<Boolean> observe;
     private final Setting<Integer> window;
+    private final Setting<Boolean> acPresent;
 
     private boolean kicked;
     private String kickReason;
@@ -77,6 +78,12 @@ public final class MovementObserver {
             .name("outcome-window-ticks")
             .description("Ticks to wait after a probe for a server correction before classifying it as silently accepted.")
             .defaultValue(10).range(2, 200).sliderRange(2, 60)
+            .visible(observe::get).build()
+        );
+        acPresent = g.add(new BoolSetting.Builder()
+            .name("ac-present")
+            .description("An anticheat IS installed on the target. When OFF, silent-accept is expected (nothing is judging the movement) and the report says so instead of flagging it — so you don't mistake 'no AC' for 'AC missed it'.")
+            .defaultValue(true)
             .visible(observe::get).build()
         );
     }
@@ -161,12 +168,17 @@ public final class MovementObserver {
                 ? " — \"" + kickReason + "\"" : ""));
         }
         out.add(String.format("  Echo: %d setback, %d silent-accept (of %d probes)", setbacks, silent, sent));
-        if (silent > 0 && setbacks == 0)
-            out.add("  → SILENT-ACCEPT on every probe: AC did not model this sequence — INVESTIGATE");
-        else if (silent > 0)
-            out.add("  → mixed: some probes slipped through (" + silent + ") — partial model coverage");
-        else if (setbacks > 0)
-            out.add("  → corrected every probe: AC caught this vector");
+        if (silent > 0 && setbacks == 0) {
+            if (acPresent.get())
+                out.add("  → SILENT-ACCEPT on every probe: the AC did not model this sequence — INVESTIGATE");
+            else
+                out.add("  → SILENT-ACCEPT on every probe — but ac-present is OFF, so this is EXPECTED (nothing was judging the movement). Enable your AC and set ac-present to get a real result.");
+        } else if (silent > 0) {
+            out.add("  → mixed: some probes slipped through (" + silent + ")"
+                + (acPresent.get() ? " — partial model coverage" : " — ac-present is OFF, interpret with that in mind"));
+        } else if (setbacks > 0) {
+            out.add("  → corrected every probe: the AC caught this vector");
+        }
         if (corrections > 0)
             out.add(String.format("  Correction magnitude: max %.3f b, avg %.3f b over %d corrections",
                 maxCorrection, totalCorrection / corrections, corrections));

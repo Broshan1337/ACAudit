@@ -49,7 +49,7 @@ public class Speed extends Module {
     );
     private final Setting<Boolean> adaptiveSeek = sgGeneral.add(new BoolSetting.Builder()
         .name("adaptive-seek")
-        .description("Start near vanilla and raise speed every seek-interval until the server sets you back, then back off — finds the EXACT detection threshold instead of guessing.")
+        .description("Start near vanilla and raise speed every seek-interval until the server sets you back, then back off — finds the EXACT detection threshold instead of guessing. (For per-state threshold mapping as a dedicated instrument, use offset-boundary.)")
         .defaultValue(false).build()
     );
     private final Setting<Double> seekStep = sgGeneral.add(new DoubleSetting.Builder()

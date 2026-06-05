@@ -96,7 +96,7 @@ public class AntiSetback extends Module {
 
     public AntiSetback() {
         super(AddonTemplate.MOVEMENT_CATEGORY, "anti-setback",
-            "Rejects / spoofs server position-corrections. Tests whether AC enforcement survives a non-cooperative client.");
+            "Rejects / spoofs server position-corrections. Tests whether AC enforcement survives a non-cooperative client. COMBINE WITH speed/phase — alone it does nothing; together it tests whether a dropped correction = a bypass.");
     }
 
     @Override

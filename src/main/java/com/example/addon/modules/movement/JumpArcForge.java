@@ -149,6 +149,9 @@ public class JumpArcForge extends Module {
     private void onReceivePacket(PacketEvent.Receive event) { obs.onReceive(event.packet); }
 
     @EventHandler
+    private void onSendSuppress(PacketEvent.Send event) { if (seq.filterSend(event.packet)) event.cancel(); }
+
+    @EventHandler
     private void onGameLeft(GameLeftEvent event) {
         obs.onKick();
         if (autoDisable.get() && isActive()) toggle();

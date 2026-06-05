@@ -27,9 +27,19 @@ public final class PhysicsSequencer {
     private final MinecraftClient mc = MinecraftClient.getInstance();
 
     private final Setting<Boolean> applyToClient;
+    private final Setting<Boolean> suppressVanilla;
 
     private double x, y, z;
     private boolean started;
+
+    // Vanilla-move suppression: while a sequence is emitting, the vanilla client ALSO
+    // sends its own PlayerMove that tick, interleaving the real position into the
+    // fabricated sequence and polluting the impossible path. We cancel the vanilla
+    // move that arrives in the same tick as a sequencer step. `sendingOwn` guards the
+    // sequencer's OWN sends from being cancelled; `armedAt` bounds suppression to the
+    // current tick (~one game tick = 50ms) so a later legitimate move is never dropped.
+    private boolean sendingOwn;
+    private long armedAt = -1;
 
     public PhysicsSequencer(SettingGroup g) {
         applyToClient = g.add(new BoolSetting.Builder()
@@ -37,6 +47,25 @@ public final class PhysicsSequencer {
             .description("Also snap the local client to the faked position (you see the desync). Off = only the reported position moves.")
             .defaultValue(false).build()
         );
+        suppressVanilla = g.add(new BoolSetting.Builder()
+            .name("suppress-vanilla-move")
+            .description("Cancel the vanilla movement packet on ticks the sequence emits, so the server sees ONLY the fabricated path (not the real position interleaved). Leave on for a clean probe.")
+            .defaultValue(true).build()
+        );
+    }
+
+    private void arm() { if (suppressVanilla.get()) armedAt = System.currentTimeMillis(); }
+
+    /**
+     * Owning module forwards PacketEvent.Send here: returns true if this is the
+     * vanilla movement packet to cancel (same tick as a sequencer step, not the
+     * sequencer's own send).
+     */
+    public boolean filterSend(Object packet) {
+        if (sendingOwn || armedAt < 0) return false;
+        if (System.currentTimeMillis() - armedAt > 60) { armedAt = -1; return false; }
+        if (packet instanceof PlayerMoveC2SPacket) { armedAt = -1; return true; }
+        return false;
     }
 
     /** Snapshot the player's current authoritative position as the sequence origin. */
@@ -70,12 +99,18 @@ public final class PhysicsSequencer {
     /** Emit only an onGround flag with no positional change (ground-state flicker). */
     public void groundFlag(boolean onGround) {
         if (mc.player == null) return;
+        arm();
+        sendingOwn = true;
         mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(onGround, false));
+        sendingOwn = false;
     }
 
     private void sendCurrent(boolean onGround, boolean horizontalCollision) {
+        arm();
+        sendingOwn = true;
         mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
             x, y, z, onGround, horizontalCollision));
+        sendingOwn = false;
         if (applyToClient.get()) mc.player.setPosition(x, y, z);
     }
 
