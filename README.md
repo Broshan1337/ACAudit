@@ -167,7 +167,7 @@ Test whether action **rate and timing** are enforced server-side, not just trust
 | `ac-fast-use` | item use faster than vanilla allows — use / cooldown enforcement (eat, pearl, potion) |
 | `fast-attack` | many attacks per tick on the looked-at entity — attack-cooldown / hit-rate enforcement |
 
-### AuditAC-Testing — diagnostics, automated harness & experimental abuse
+### AuditAC-Testing-Beta — diagnostics, automated harness & experimental abuse
 Measurement and orchestration for resilience testing, plus the sneakier packet-timing vectors. **Run against your own local server only.**
 
 **Diagnostics & harness**
@@ -176,7 +176,6 @@ Measurement and orchestration for resilience testing, plus the sneakier packet-t
 | `server-probe` | live read-only readout: TPS · ping · setbacks/sec · in/out packets/sec · last kick reason — watch the server react in real time |
 | `server-health-monitor` | passive TPS (time-update cadence) + ping estimator — measurement source for the harness |
 | `soak-test` | drives one load module for a fixed window, reports **PASS/FAIL** vs. TPS floor / ping ceiling / disconnect |
-| `stress-runner` | runs each named load module in sequence, prints a per-vector **PASS/FAIL** table — automated resilience sweep |
 | `lag-profiler` | **ramps** one packet vector's rate and reports the rate that first drops TPS below the floor — finds the breaking point |
 
 **Experimental packet abuse**
@@ -186,6 +185,7 @@ Measurement and orchestration for resilience testing, plus the sneakier packet-t
 | `packet-reorder` | buffers movement/action packets and releases them reversed or shuffled — causal-order validation |
 | `confirm-desync` | withholds teleport-confirm packets — how the server handles an unacknowledged setback |
 | `metadata-flood` | floods legal metadata packets (sprint-toggle / held-slot / client-options) that are cheap to send but force **O(viewers) rebroadcast** — CPU exhaustion + Netty backpressure |
+| `packet-inspector` | **packet-level audit platform.** Live C2S/S2C log with type/direction filter, pause, export; click a packet to view all fields; for C2S record packets **edit one field and replay** (once / N× / delay) to test server-side validation; **record an outbound sequence and replay it with scaled timing** to test rate-limiting. **Save sequences across sessions** (`config/acaudit/sequences/`, hybrid wire-bytes + readable fields) and browse/load/export/import a library; saved sequences are first-class in `auto-audit-runner` via `seq:<name>` / `seqtag:<tag>` (regression testing across plugin updates). Captures every other module's traffic too. Custom GUI screen (opens on enable, or via `open-key`). |
 
 (`ping-spoof` in AuditAC-Movement also has a **`max-window`** mode — keepalive starvation that holds responses ~29s, just under the timeout, for the maximum lag window.)
 
@@ -198,16 +198,82 @@ Measurement and orchestration for resilience testing, plus the sneakier packet-t
 | `combat-pattern-monitor` | logs CPS, swing-to-attack ratio, multi-attack ticks — combat baseline for AC calibration |
 | `command-rate-limit-probe` | sends command variants (normal / namespaced / mixed-case / aliased) and watches for rate-limit responses |
 
-**New automation modules**
+**Automation pipeline**
 | Module | Purpose |
 |---|---|
-| `auto-audit-runner` | sequential module sweep with per-vector PASS/FAIL; saves timestamped report to `config/acaudit/reports/` |
-| `combo-test` | activates two named modules simultaneously and reports combined TPS impact — compound-vector stress |
-| `vector-matrix` | runs the full crash vector list in sequence and saves a PASS/FAIL matrix to `config/acaudit/reports/` |
+| `auto-audit-runner` | **the pipeline.** GUIDED / QUICK / CUSTOM sweep that *grades* each vector from the packet stream (setbacks · item dupe/loss · AC detection via chat/action-bar/title/kick · min TPS · server hang) and assigns a **severity**; writes **text + markdown + json** with platform context; **diffs against the previous run** (regression); **dry-run**, per-category **skip** toggles, pre-run **safety gate**; **parallel groups** (join names with `+`); **crash safety** (recovery-gated gaps, recovery-time, crash/lag/hang classification, safe-mode); **auto-rejoin** + resume on kick |
+| `combo-orchestrator` | runs **3+ vectors simultaneously** with per-vector stagger and a **named combo library** (SpeedPlusInteractionFlood, TimerPlusBlink, DupeUnderLag, …); **auto-baselines** each vector alone then flags **combination-only** effects |
+| `audit-scenarios` | named Paper playbooks: **econ-integrity** (balance → fuzz → balance → net-diff), **AC-coverage-map** (detected/undetected per movement vector), **stability-baseline** (TPS + recovery profile), **plugin-fingerprint**, **combo-matrix** (every pair vs each alone) — each emits a severity report |
+
+Reports land in `config/acaudit/reports/` as `*.txt` (read), `*.md` (paste into a GitHub/Discord report), and `*.json` (machine-readable + the regression-diff input). Severity: **CRITICAL** crash/confirmed-dupe · **HIGH** AC/economy bypass · **MEDIUM** degraded/ambiguous · **LOW/INFO** context. AC-detection lines are heuristic client-side signals — correlate with server/AC logs.
 
 Most modules include an **`auto-disable`** option (on by default) that switches the module off when you are kicked or disconnect, so a failed test doesn't keep firing on reconnect.
 
 All modules now include a **`show-stats`** checkbox (on by default). When the module is deactivated, it prints how many ticks it was active and how many packets it sent — useful for confirming the module actually fired and quantifying the load applied.
+
+### AuditAC-Injection — SQL injection & data-integrity fuzzing
+Plugins backing economy / player-data / shops / ranks / punishments with SQL (MySQL, MariaDB, SQLite, Postgres, MSSQL; MongoDB via the NoSQL set) frequently concatenate command arguments into queries. If an argument reaches the query unsanitised, the whole database is exposed. **Run on your own server, to get the plugin patched.**
+
+| Module | Tests / patch signal |
+|---|---|
+| `sql-injection-fuzz` | Pushes SQL-injection payloads through a command's argument (`balance {x}`, `pay Notch {x}`, `team description {x}`) and **infers execution** from: a leaked DB driver/syntax error (near-proof → CRITICAL), a time delay from `SLEEP`/`WAITFOR`/`BENCHMARK`, a TPS dip from a heavy synchronous query, or an unusual kick/silence. **Fix: parameterised queries / prepared statements + input validation.** |
+| `plugin-fuzz` | **Targeted, plugin-aware fuzzing.** Drives a curated [data-driven library](CONTRIBUTING.md) of payloads matched to specific plugins (LiteBans, AdvancedBan, BanManager, CMI, AuctionHouse, QuickShop, LuckPerms, EssentialsX…) and their exact commands/args — and to each plugin's **storage model** (SQLi only where SQL exists; FLATFILE plugins get format/length/special instead). Targets plugins **auto-detected** by `command-fingerprint` or named manually. Each finding names the plugin, command, argument, evidence, disclosure URL and fix. Community-extendable via `config/acaudit/plugin_payloads.json`. |
+
+**Payload categories** (toggle per scan): Classic (quotes/comments/tautologies) · Error-based (schema/version leak) · Time-based blind (SLEEP/WAITFOR/BENCHMARK) · Stacked (DROP/DELETE/… — **destructive, gated off by default**) · Encoded (hex/URL/CHAR bypass) · NoSQL (Mongo `$ne`/`$gt`/`$where`) · Second-order (stored now, triggers on later read). **Scan modes:** Quick / Full / Category / Custom-payload.
+
+**Honesty:** a client cannot see the database — findings are **candidates to confirm against the plugin's query logs**, not proof (a leaked error is the closest to proof). Time/TPS signals are confounded by async DB pools; absence of a signal is *not* a guarantee of safety. Every finding says so. Destructive payloads require an explicit `allow-destructive` toggle **and** the local-server safety gate. Reports export as text/markdown/json for responsible disclosure.
+
+---
+
+## Platform awareness — Paper / Bukkit / Spigot / Folia
+
+ACAudit's only real target is a **Bukkit-based platform running plugins** — Paper, Spigot, Purpur, Folia, or a fork — because that is the only place an anticheat (Grim, Vulcan, Verus, Matrix, Spartan, AAC, custom) or an economy plugin (Vault) exists. Vanilla has none of these. Every abstraction layer between the packet and the plugin (NMS → CraftBukkit → Bukkit API → the plugin's event listener) is a place where what the packet says and what the plugin sees can diverge, and that gap is where the vectors below live. ACAudit is a **client**: it can send packets and observe outcomes, so these probe what a client can actually drive — server-internal races, NMS-vs-API divergence and event-priority ordering are documented but not modules, because a client cannot observe them.
+
+Each module's docstring carries a `PLATFORM:` tag: **Bukkit-universal** (same on any fork), **Paper-specific** (Paper behavior or Paper-only plugins), **Platform-dependent** (differs per fork/config — documented), or **Folia** (real only on Folia's regionized threading).
+
+| Module | Tab | Platform | Tests / patch signal |
+|---|---|---|---|
+| `econ-fuzz` | Dupe | Paper | Economy command values that **reach the plugin's parser** (sci-notation, locale-comma, Unicode digits, 2⁵³ precision-loss) — not the server char filter. Parse in try/catch with a fixed locale + non-double money type |
+| `vault-value-probe` | Dupe | Paper | Two-account transfer (`/pay`) amounts that break the withdraw/deposit invariant. Make transfers atomic; reject non-finite/negative |
+| `sign-content-fuzz` | Dupe | Paper | Fuzzed sign-line text → sign-shop plugins (ChestShop/QuickShop). Validate sign input like command input |
+| `slot-sync-probe` | Dupe | Bukkit-univ. | Raw out-of-range syncId/slot/button/revision → maps what the platform normalizes vs passes to plugins raw. Validate every container field in-plugin |
+| `event-order-probe` | Dupe | Bukkit-univ. | Same effect via different Bukkit events (drop = PlayerDropItem / outside-click / THROW) + synthetic order (close-before-open). Guard an action by **every** event that produces it |
+| `flight-claim` | Move | Bukkit-univ. | Asserts `flying=true` via UpdatePlayerAbilities. Never trust the client ability bit |
+| `input-toggle-desync` | Move | Bukkit-univ. | Sprint/sneak/input toggles faster than the server reconciles. Rate-limit pose state; derive it from movement |
+| `respawn-model-reset` | Move | Bukkit-univ. | Illegal hop immediately after respawn — does the AC reset its model or leak pre-death state? Fully reset per life |
+| `platform-probe` | Testing | detects | Reads `minecraft:brand` → Paper/Spigot/Folia/Purpur, and flags packet-limiter kicks. **Context for every other result** |
+| `plugin-message-probe` | Testing | Paper | BungeeCord/Velocity messages (Connect/Forward/PlayerCount/GetServers/malformed) + channel register spam. Don't act on client-sent `bungeecord:main` |
+| `cookie-probe` | Testing | Paper | Forged/oversized cookie responses (1.20.5+ proxy cookies). Only accept cookies matching a request; bound size |
+| `packet-limiter-map` | Testing | Paper | Ramps one packet type until Paper's packet-limiter engages, reporting the **threshold per type** |
+| `command-fingerprint` | Testing | Paper | Enumerates installed plugins via command tab-completion (namespaced aliases). Restrict completion to permitted commands |
+| `folia-cross-region` | Testing | **Folia** | Fires actions on chunk/region boundaries to trigger Folia cross-region thread races. Schedule cross-region ops onto the owning thread |
+| `recipe-advancement-fuzz` | Crash | Bukkit-univ. | Garbage `CraftRequest` recipe ids + `AdvancementTab` flood. Validate ids before any grid mutation |
+| `unloaded-chunk-interact` | Crash | Platform-dep. | Block actions / NBT queries at far/unloaded coords. Reject actions whose chunk isn't loaded-for-this-player |
+| `completion-crash` | Crash | Bukkit-univ. | (deepened) `PLUGIN_FUZZ` mode: special-char/over-long tab-complete partials reaching plugin `TabCompleteEvent` handlers |
+
+### Paper configuration that changes your results
+
+A result is only meaningful against a known config. The settings that move ACAudit's needle:
+
+| Setting | File | Affects |
+|---|---|---|
+| `packet-limiter` (all-packets + per-type thresholds) | `paper-global.yml` | **Biggest single effect** — throttles every Crash flood, `packet-limiter-map`, `timer-balance-soak`. A "flood stopped" on Paper may be the limiter, not validation (Spigot has none) |
+| `moved-too-quickly` / `moved-wrongly` thresholds | `spigot.yml` | Baseline correction for all movement vectors |
+| `bungeecord: true` | `spigot.yml` / proxy config | Enables the `plugin-message-probe` BungeeCord path |
+| `spawn-limits` / `ticks-per` | `bukkit.yml` | `entity-spam` / `entity-push-model` relevance |
+| book / chat / anti-xray limits | `paper-world-defaults.yml` | Content-flood and `unloaded-chunk-interact` behavior |
+
+Run `platform-probe` first: every other module's output should be read against the brand and config it reports.
+
+### Multi-vector & guided audit
+
+Real attackers probe many surfaces at once, and concurrent vectors expose failures (resource competition, out-of-order processing, combined-pressure states) that no single vector reveals. **`combo-orchestrator`** runs 3+ modules simultaneously with a per-vector **start-offset (stagger)**, detects structural conflicts (two velocity-writers, or two packet-holders, can't truly co-run — it warns and suggests a non-conflicting substitute), and grades what the **combination** produced — TPS, setbacks, inventory resyncs, server messages, kicks — so you can spot effects that only appear together (e.g. *dupe race + lag inducer*, *anti-setback + speed*, *econ-fuzz + interaction-flood*).
+
+**`auto-audit-runner`** in **GUIDED** mode runs a recommended first-audit sequence: `platform-probe` and `server-health-monitor` stay on for the whole run, then quiet movement/dupe probes first and crash modules last; movement/dupe steps are marked `RAN (inspect logs)` rather than TPS-graded. See **[TESTING_GUIDE.md](TESTING_GUIDE.md)** for what to watch in your server/AC/economy logs, which modules need a 2nd player / proxy / Folia, and the full combination table.
+
+### Server-side surfaces (documented, not modules)
+
+Some real Paper surfaces are **not client-observable**, so ACAudit documents them rather than shipping modules that can't grade themselves: async chunk/scheduler windows (real on **Folia**, narrow on standard Paper), NMS-vs-Bukkit-API value divergence, event-priority/shared-state races, the BungeeCord handshake IP-forwarding spoof and Velocity modern-forwarding secret (both handshake-stage, outside a play-state client). Where a *trigger* is useful (e.g. `folia-cross-region`) the module fires the sequence and asks you to **correlate the count with server logs**.
 
 ---
 
