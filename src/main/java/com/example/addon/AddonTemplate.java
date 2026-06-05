@@ -41,6 +41,10 @@ import com.example.addon.modules.antidupe.ShulkerRace;
 import com.example.addon.modules.antidupe.SlotExploit;
 import com.example.addon.modules.antidupe.SlotOverlay;
 import com.example.addon.modules.antidupe.TwoWindowRace;
+import com.example.addon.modules.antidupe.SlotSyncProbe;
+import com.example.addon.modules.antidupe.EventOrderProbe;
+import com.example.addon.modules.antidupe.VaultValueProbe;
+import com.example.addon.modules.antidupe.SignContentFuzz;
 import com.example.addon.modules.crash.*;
 import com.example.addon.modules.testing.*;
 import com.example.addon.modules.movement.AirJump;
@@ -91,6 +95,9 @@ import com.example.addon.modules.movement.SourceAttribution;
 import com.example.addon.modules.movement.LowTPSReach;
 import com.example.addon.modules.movement.BaselinePoison;
 import com.example.addon.modules.movement.VehicleSimGap;
+import com.example.addon.modules.movement.RespawnModelReset;
+import com.example.addon.modules.movement.FlightClaim;
+import com.example.addon.modules.movement.InputToggleDesync;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
@@ -107,8 +114,26 @@ public class AddonTemplate extends MeteorAddon {
     public static final Category MOVEMENT_CATEGORY = new Category("AuditAC-Movement");
     public static final Category DUPE_CATEGORY     = new Category("AuditAC-Dupe");
     public static final Category CRASH_CATEGORY    = new Category("AuditAC-Crash");
-    public static final Category TESTING_CATEGORY  = new Category("AuditAC-Testing");
+    public static final Category TESTING_CATEGORY  = new Category("AuditAC-Testing-Beta");
+    public static final Category INJECTION_CATEGORY = new Category("AuditAC-Injection");
     public static final HudGroup HUD_GROUP         = new HudGroup("Example");
+
+    /** Register a C2S custom-payload type, skipping channels Minecraft already reserves. */
+    private static <T extends net.minecraft.network.packet.CustomPayload> void registerPayload(
+            net.minecraft.network.packet.CustomPayload.Id<T> id,
+            net.minecraft.network.codec.PacketCodec<? super net.minecraft.network.RegistryByteBuf, T> codec) {
+        try {
+            net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S().register(id, codec);
+        } catch (IllegalArgumentException e) {
+            LOG.info("Plugin channel {} already registered — skipping.", id.id());
+        }
+    }
+
+    /** Register a plugin-message channel on demand (for the packet-script sender), ignoring already-registered. */
+    public static void ensureChannelRegistered(net.minecraft.util.Identifier ch) {
+        registerPayload(new net.minecraft.network.packet.CustomPayload.Id<>(ch),
+                        com.example.addon.modules.testing.PluginChannelPayload.codec(ch));
+    }
 
     @Override
     public void onInitialize() {
@@ -116,9 +141,19 @@ public class AddonTemplate extends MeteorAddon {
 
         // Register an outbound custom-payload type so channel-flood can ship a
         // valid plugin-channel header with an arbitrary (malformed/oversized) body.
-        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playC2S()
-            .register(com.example.addon.modules.crash.MalformedPayload.ID,
-                      com.example.addon.modules.crash.MalformedPayload.CODEC);
+        registerPayload(com.example.addon.modules.crash.MalformedPayload.ID,
+                        com.example.addon.modules.crash.MalformedPayload.CODEC);
+        // Register the plugin-message channels plugin-message-probe sends on.
+        // minecraft:register / minecraft:unregister are RESERVED — vanilla already
+        // registers a payload type for them, so re-registering throws. We register
+        // our custom bungeecord:main and skip any that are already taken.
+        for (net.minecraft.util.Identifier ch : new net.minecraft.util.Identifier[]{
+                com.example.addon.modules.testing.PluginMessageProbe.BUNGEE,
+                com.example.addon.modules.testing.PluginMessageProbe.REGISTER,
+                com.example.addon.modules.testing.PluginMessageProbe.UNREGISTER}) {
+            registerPayload(new net.minecraft.network.packet.CustomPayload.Id<>(ch),
+                            com.example.addon.modules.testing.PluginChannelPayload.codec(ch));
+        }
 
         Modules.get().add(new ModuleExample());
 
@@ -176,8 +211,18 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new BaselinePoison());
         Modules.get().add(new VehicleSimGap());
 
+        // --- Movement platform/identity probes (Paper/Bukkit-aware) ---
+        Modules.get().add(new RespawnModelReset());
+        Modules.get().add(new FlightClaim());
+        Modules.get().add(new InputToggleDesync());
+
         // --- Anti-dupe ---
         Modules.get().add(new SlotExploit());
+        // --- Anti-dupe platform probes (Paper/Bukkit-aware) ---
+        Modules.get().add(new SlotSyncProbe());
+        Modules.get().add(new EventOrderProbe());
+        Modules.get().add(new VaultValueProbe());
+        Modules.get().add(new SignContentFuzz());
         Modules.get().add(new InteractionFlood());
         Modules.get().add(new DropPickupDupe());
         Modules.get().add(new ContainerExploit());
@@ -230,6 +275,8 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new PositionCrash());
         Modules.get().add(new BookCrash());
         Modules.get().add(new CompletionCrash());
+        Modules.get().add(new RecipeAdvancementFuzz());
+        Modules.get().add(new UnloadedChunkInteract());
         Modules.get().add(new ContainerCrash());
         Modules.get().add(new CreativeCrash());
         Modules.get().add(new EntityCrash());
@@ -271,7 +318,14 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new ServerHealthMonitor());
         Modules.get().add(new SoakTest());
         Modules.get().add(new ServerProbe());
-        Modules.get().add(new StressRunner());
+        // --- Platform/proxy probes (Paper/Bukkit/Folia-aware) ---
+        Modules.get().add(new PlatformProbe());
+        Modules.get().add(new PluginMessageProbe());
+        Modules.get().add(new CookieProbe());
+        Modules.get().add(new PacketLimiterMap());
+        Modules.get().add(new CommandFingerprint());
+        Modules.get().add(new FoliaCrossRegion());
+        Modules.get().add(new ComboOrchestrator());
         Modules.get().add(new LagProfiler());
         Modules.get().add(new TypedBlink());
         Modules.get().add(new PacketReorder());
@@ -283,8 +337,12 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new CombatPatternMonitor());
         Modules.get().add(new CommandRateLimitProbe());
         Modules.get().add(new AutoAuditRunner());
-        Modules.get().add(new ComboTest());
-        Modules.get().add(new VectorMatrix());
+        Modules.get().add(new AuditScenarios());
+        Modules.get().add(new PacketInspector());
+
+        // --- Injection ---
+        Modules.get().add(new com.example.addon.modules.injection.SqlInjectionFuzz());
+        Modules.get().add(new com.example.addon.modules.injection.PluginFuzz());
 
         Commands.add(new CommandExample());
         Hud.get().register(HudExample.INFO);
@@ -297,6 +355,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules.registerCategory(DUPE_CATEGORY);
         Modules.registerCategory(CRASH_CATEGORY);
         Modules.registerCategory(TESTING_CATEGORY);
+        Modules.registerCategory(INJECTION_CATEGORY);
     }
 
     @Override
