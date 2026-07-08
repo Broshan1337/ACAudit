@@ -107,7 +107,7 @@ public class MovementCrash extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; currentRate = 1; subtleInit = false;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
         if (autoMonitor.get()) {
             var shm = Modules.get().get(ServerHealthMonitor.class);
             if (shm != null && !shm.isActive()) shm.toggle();
@@ -131,6 +131,7 @@ public class MovementCrash extends Module {
     private void fireFlood() {
         int rate = rampMode.get() ? currentRate : packets.get();
         if (rampMode.get()) currentRate += rampStep.get();
+        rate = gr.scale(rate);   // apply CrashSafety PROBE ramp + intensity cap
         Vec3d pos = mc.player.getEntityPos();
         for (int i = 0; i < rate; i++) {
             mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.Full(

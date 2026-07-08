@@ -61,14 +61,14 @@ public class FastAttack extends Module {
     private int ticksActive = 0, packetsSent = 0;
 
     public FastAttack() {
-        super(AddonTemplate.CRASH_CATEGORY, "fast-attack",
-            "Attacks the looked-at entity many times per tick. Tests server-side attack-cooldown / hit-rate enforcement.");
+        super(AddonTemplate.MOVEMENT_CATEGORY, "fast-attack",
+            "Attacks the looked-at entity many times per tick. Tests server-side attack-cooldown / hit-rate enforcement (AC test — not a crash/lag vector).");
     }
 
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler
@@ -83,6 +83,7 @@ public class FastAttack extends Module {
 
         for (int i = 0; i < hitsPerTick.get(); i++) {
             mc.interactionManager.attackEntity(mc.player, target);
+            packetsSent++;
             if (swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
         }
         gr.markFired();

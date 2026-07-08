@@ -12,7 +12,6 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
 import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.ScreenHandler;
 
@@ -129,8 +128,8 @@ public final class DupeObserver {
         if (!observe.get()) return;
         if (packet instanceof DisconnectS2CPacket d) {
             kicked = true; kickReason = d.reason().getString();
-        } else if (packet instanceof ScreenHandlerSlotUpdateS2CPacket || packet instanceof PlayerPositionLookS2CPacket) {
-            confirms++;
+        } else if (packet instanceof ScreenHandlerSlotUpdateS2CPacket) {
+            confirms++;   // a slot update is the server confirming a click; a position-look is a MOVEMENT setback, not an inventory confirm — don't conflate them
         } else if (packet instanceof InventoryS2CPacket) {
             resyncs++;
         } else if (packet instanceof GameMessageS2CPacket m) {

@@ -72,7 +72,7 @@ public class PassengerLoop extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
         if (autoMonitor.get()) {
             var shm = Modules.get().get(ServerHealthMonitor.class);
             if (shm != null && !shm.isActive()) shm.toggle();

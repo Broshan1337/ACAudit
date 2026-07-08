@@ -1,9 +1,11 @@
 package com.example.addon.modules.crash;
 
+import com.example.addon.audit.KickClassifier;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
@@ -41,6 +43,10 @@ import java.util.function.Consumer;
 public final class GracefulResponse {
     private final Setting<Boolean> observe;
     private final Setting<Integer> silenceWindow;
+    private final CrashSafety safety;   // mid-run abort net + PROBE/STRESS + intensity cap (settings added to the same group)
+
+    private Module owner;
+    private CrashProfile profile;
 
     private boolean kicked;
     private String kickReason;
@@ -64,16 +70,41 @@ public final class GracefulResponse {
             .defaultValue(20).range(2, 200).sliderRange(2, 100)
             .visible(observe::get).build()
         );
+        safety = new CrashSafety(g);   // adds safety-mode / abort-below-tps / intensity-cap settings to every crash module
     }
 
     public boolean enabled() { return observe.get(); }
     public boolean kicked()  { return kicked; }
 
-    public void onActivate() {
+    /** Legacy no-owner init (no mid-run abort / profile). Prefer {@link #onActivate(Module)}. */
+    public void onActivate() { onActivate(null); }
+
+    /**
+     * Init with the owning module so the safety net can auto-disable it on degradation and
+     * its {@link CrashProfile} (realism tag / severity / safe intensity / what to watch) is
+     * printed up front. Looks the profile up in {@link CrashProfiles} by module name.
+     */
+    public void onActivate(Module self) {
         kicked = false; kickReason = null;
         firedCount = 0; responseCount = 0; ticksSinceFire = -1;
         health = null; minTps = 20.0; sawTps = false;
+        owner = self;
+        // Auto-enable the health monitor so EVERY crash module grades tick-loop impact by
+        // default (previously only ~5 modules did, so TPS usually read "not sampled").
+        ServerHealthMonitor shm = Modules.get().get(ServerHealthMonitor.class);
+        if (shm != null && !shm.isActive()) shm.toggle();
+        safety.onActivate(self);
+        if (self != null) {
+            profile = CrashProfiles.get(self.name);
+            for (String l : profile.lines()) self.info("%s", l);
+        }
     }
+
+    /** Clamp a per-tick count by the PROBE ramp + intensity cap. Modules wrap their loop counts with this. */
+    public int scale(int requested) { return safety.scale(requested); }
+
+    /** False once the safety net has aborted (or is holding). Modules may gate firing on this. */
+    public boolean firingAllowed() { return !safety.aborted(); }
 
     /** Record that the vector fired this tick. */
     public void markFired() {
@@ -83,6 +114,8 @@ public final class GracefulResponse {
 
     /** Call once per module tick; samples TPS and advances the silence window. */
     public void tick() {
+        // Drive the safety net every tick (advances PROBE ramp, aborts the module if TPS floors).
+        if (owner != null) safety.keepFiring();
         if (!observe.get()) return;
         if (ticksSinceFire >= 0) ticksSinceFire++;
         if (health == null) health = Modules.get().get(ServerHealthMonitor.class);
@@ -118,8 +151,10 @@ public final class GracefulResponse {
         List<String> out = new ArrayList<>();
         if (!observe.get()) return out;
         if (kicked) {
-            out.add("  Response: REJECTED" + (kickReason != null && !kickReason.isBlank()
-                ? " — \"" + kickReason + "\"" : " (disconnect, no reason text captured)"));
+            out.add("  Response: REJECTED via disconnect");
+            // Classify the kind: a Paper limiter kick is the server defending correctly (PASS),
+            // an internal-exception/timeout kick is a fault. Don't conflate them.
+            out.add("    " + KickClassifier.describe(kickReason));
         } else if (firedCount > 0 && responseCount == 0) {
             out.add("  Response: SILENT DROP after " + ticksSinceFire + " ticks — no resync/setback seen"
                 + " (server ignored it, or processed it without correcting — investigate the latter)");
@@ -132,8 +167,9 @@ public final class GracefulResponse {
             out.add(String.format("  TPS: min %.1f during run%s", minTps,
                 minTps >= 19.0 ? " (held)" : " — degraded; check recovery with server-probe"));
         } else {
-            out.add("  TPS: not sampled (enable server-health-monitor to grade tick-loop impact)");
+            out.add("  TPS: not sampled (server-health-monitor unavailable)");
         }
+        if (owner != null) out.add(safety.reportLine());
         return out;
     }
 

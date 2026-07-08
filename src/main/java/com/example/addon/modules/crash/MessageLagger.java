@@ -68,12 +68,12 @@ public class MessageLagger extends Module {
 
     public MessageLagger() {
         super(AddonTemplate.CRASH_CATEGORY, "message-lagger",
-            "Sends dense Unicode messages that lag other clients rendering them.");
+            "Sends dense Unicode chat that lags recipients' CLIENT renderers (not the server). Tests chat rate/length limits + high-plane Unicode stripping. Own server only.");
     }
 
     @Override
     public void onActivate() { ticksActive = 0; packetsSent = 0;
-        gr.onActivate();
+        gr.onActivate(this);
         if (!keepSending.get()) {
             send();
             toggle();
@@ -106,6 +106,7 @@ public class MessageLagger extends Module {
         } else {
             ChatUtils.sendPlayerMsg(message);
         }
+        packetsSent++;
     }
 
     private String generate() {

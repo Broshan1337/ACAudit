@@ -87,7 +87,7 @@ public class CloseClick extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.player.currentScreenHandler == null) return;
+        if (!GuiState.containerOpen(mc)) return;   // real container GUI only (see GuiState)
         ticksActive++;
         obs.tick();
         boolean p = key.get().isPressed();

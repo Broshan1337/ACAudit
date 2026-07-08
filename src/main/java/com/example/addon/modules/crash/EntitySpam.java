@@ -75,7 +75,7 @@ public class EntitySpam extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; latched = null;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler

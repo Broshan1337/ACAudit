@@ -68,6 +68,11 @@ public class ManualClick extends Module {
         .name("action").description("SlotActionType to send.")
         .defaultValue(Action.PICKUP).build()
     );
+    private final Setting<Integer> prePickupSlot = sgPacket.add(new IntSetting.Builder()
+        .name("pre-pickup-slot")
+        .description("-1 = off. Otherwise send a real PICKUP on this slot first, so the crafted click lands with a genuine NON-EMPTY cursor. The wire cursor-hash is a client-integrity field the server recomputes, so driving a real cursor via a preceding pickup is the correct way to probe non-empty-cursor handling.")
+        .defaultValue(-1).range(-1, 32767).sliderRange(-1, 45).build()
+    );
 
     // --- firing ---
     private final Setting<Trigger> trigger = sgFire.add(new EnumSetting.Builder<Trigger>()
@@ -147,6 +152,14 @@ public class ManualClick extends Module {
             case ZERO -> 0;
             case CUSTOM -> customRev.get();
         };
+
+        // Optionally establish a real non-empty cursor first with a genuine PICKUP.
+        if (prePickupSlot.get() >= 0) {
+            mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(
+                syncId, revision, (short) (int) prePickupSlot.get(), (byte) 0, SlotActionType.PICKUP,
+                new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY));
+            packetsSent++;
+        }
 
         for (int i = 0; i < count.get(); i++) {
             mc.player.networkHandler.sendPacket(new ClickSlotC2SPacket(

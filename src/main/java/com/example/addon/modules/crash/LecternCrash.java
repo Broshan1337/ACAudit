@@ -50,7 +50,7 @@ public class LecternCrash extends Module {
     public void onActivate() {
         fired = false;
         waitTicks = 0;
-        gr.onActivate();
+        gr.onActivate(this);
     }
 
     @EventHandler

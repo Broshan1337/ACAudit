@@ -73,7 +73,7 @@ public class ArmAnimationFlood extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; currentRate = 1;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler
@@ -84,6 +84,7 @@ public class ArmAnimationFlood extends Module {
         if (!cadence.shouldFire()) return;
         int rate = rampMode.get() ? currentRate : swingsPerTick.get();
         if (rampMode.get()) currentRate += rampStep.get();
+        rate = gr.scale(rate);   // apply CrashSafety PROBE ramp + intensity cap
         HandSwingC2SPacket packet = new HandSwingC2SPacket(Hand.MAIN_HAND);
         for (int i = 0; i < rate; i++) {
             mc.player.networkHandler.sendPacket(packet);

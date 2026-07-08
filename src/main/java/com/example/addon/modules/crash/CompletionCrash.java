@@ -71,7 +71,7 @@ public class CompletionCrash extends Module {
     }
 
     @Override
-    public void onActivate() { fired = false; waitTicks = 0; fuzzIdx = 0; completionId = 0; gr.onActivate(); }
+    public void onActivate() { fired = false; waitTicks = 0; fuzzIdx = 0; completionId = 0; gr.onActivate(this); }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {

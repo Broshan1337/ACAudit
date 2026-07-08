@@ -90,7 +90,7 @@ public class AnvilGrindstoneRace extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.player.currentScreenHandler == null) return;
+        if (!GuiState.containerOpen(mc)) return;   // anvil/grindstone GUI only (see GuiState)
         ticksActive++;
         obs.tick();
 

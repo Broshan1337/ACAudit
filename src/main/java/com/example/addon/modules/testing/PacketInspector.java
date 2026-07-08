@@ -47,12 +47,19 @@ public class PacketInspector extends Module {
     private final Setting<Keybind> openKey = sgGeneral.add(new KeybindSetting.Builder()
         .name("open-key").description("Reopen the inspector screen (while the module stays enabled and capturing).")
         .defaultValue(Keybind.none()).build());
+    private final Setting<Double> replaySpeed = sgGeneral.add(new DoubleSetting.Builder()
+        .name("replay-speed").description("Timing multiplier for sequence replay: 1 = real time, 10 = 10x faster, 0.5 = half speed. Record a legitimate GUI workflow (e.g. a shop purchase), then replay it fast to test rate limiting.")
+        .defaultValue(1.0).min(0.05).max(50).sliderRange(0.1, 20).build());
+    private final Setting<Keybind> replayKey = sgGeneral.add(new KeybindSetting.Builder()
+        .name("replay-recorded-key").description("Replay the last recorded outbound sequence at replay-speed.")
+        .defaultValue(Keybind.none()).build());
 
     private record Pending(Packet<?> packet, long dueMs) {}
     private final List<Pending> queue = new ArrayList<>();
     private final List<PacketLog.Entry> sequence = new ArrayList<>();
     private boolean recording;
     private boolean prevKey;
+    private boolean prevReplayKey;
 
     public PacketInspector() {
         super(AddonTemplate.TESTING_CATEGORY, "packet-inspector",
@@ -95,6 +102,13 @@ public class PacketInspector extends Module {
         boolean now = openKey.get().isPressed();
         if (now && !prevKey) open();
         prevKey = now;
+
+        boolean replayNow = replayKey.get().isPressed();
+        if (replayNow && !prevReplayKey) {
+            if (sequence.isEmpty()) warning("No recorded sequence to replay.");
+            else { info("Replaying %d packet(s) at %.2fx.", sequence.size(), replaySpeed.get()); replaySequence(replayScale()); }
+        }
+        prevReplayKey = replayNow;
 
         if (!queue.isEmpty()) {
             long t = System.currentTimeMillis();
@@ -148,6 +162,9 @@ public class PacketInspector extends Module {
 
     /** Snapshot of the in-memory recorded sequence (for saving). */
     public List<PacketLog.Entry> recordedSequence() { return new ArrayList<>(sequence); }
+
+    /** Timing scale for replays derived from the user's replay-speed multiplier (10x → scale 0.1). */
+    public double replayScale() { return 1.0 / Math.max(0.05, replaySpeed.get()); }
 
     /** Replay a loaded saved sequence with timing multiplied by {@code scale} (saved items were outbound). */
     public void replaySaved(List<SequenceStore.Timed> items, double scale) {

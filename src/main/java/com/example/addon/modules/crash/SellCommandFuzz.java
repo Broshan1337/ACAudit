@@ -73,7 +73,7 @@ public class SellCommandFuzz extends Module {
     public void onActivate() { ticksActive = 0; packetsSent = 0;
         index = 0;
         timer = 0;
-        gr.onActivate();
+        gr.onActivate(this);
     }
 
     @EventHandler

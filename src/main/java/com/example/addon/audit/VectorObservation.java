@@ -66,6 +66,19 @@ public final class VectorObservation {
     private static Map<Item, Integer> snapshot(ClientPlayerEntity player) {
         Map<Item, Integer> m = new HashMap<>();
         if (player == null) return m;
+        // Iterate the live screen handler's slots rather than only the main inventory:
+        // when a container/plugin GUI is open this covers the container slots (where a
+        // GUI dupe actually lands), and when nothing is open the player handler still
+        // exposes armor + offhand + crafting in addition to the main inventory. This
+        // mirrors DupeObserver.snapshot() so the pipeline and per-module observers agree.
+        var handler = player.currentScreenHandler;
+        if (handler != null) {
+            for (int i = 0; i < handler.slots.size(); i++) {
+                ItemStack s = handler.slots.get(i).getStack();
+                if (!s.isEmpty()) m.put(s.getItem(), m.getOrDefault(s.getItem(), 0) + s.getCount());
+            }
+            return m;
+        }
         var main = player.getInventory().getMainStacks();
         for (int i = 0; i < main.size(); i++) {
             ItemStack s = main.get(i);
@@ -131,10 +144,15 @@ public final class VectorObservation {
         if (ac != null) det.add(ac);
         for (String m : sampleMessages) det.add(m);
 
-        // Disconnect / hang dominate everything.
+        // Disconnect / hang dominate everything — but distinguish a Paper limiter kick
+        // (the server DEFENDING correctly = a PASS) from an internal-error/timeout crash.
         if (disconnected) {
-            det.add(0, "DISCONNECTED" + (disconnectReason != null && !disconnectReason.isBlank()
-                ? " — \"" + disconnectReason + "\"" : ""));
+            KickClassifier.Kind kind = KickClassifier.classify(disconnectReason);
+            det.add(0, KickClassifier.describe(disconnectReason));
+            if (!hang && KickClassifier.isDefensive(kind)) {
+                // Limiter / anti-spam / ban: the server threw us out on purpose. Not a crash.
+                return new Finding(vector, category, Severity.LOW, "REJECTED(" + kind.name() + ")", det);
+            }
             return new Finding(vector, category, Severity.CRITICAL,
                 hang ? "CRASH(after-hang)" : "DISCONNECTED", det);
         }

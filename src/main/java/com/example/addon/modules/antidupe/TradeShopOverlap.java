@@ -80,7 +80,7 @@ public class TradeShopOverlap extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.player.currentScreenHandler == null) return;
+        if (!GuiState.containerOpen(mc)) return;   // trade/shop GUI only (see GuiState)
         ticksActive++;
         obs.tick();
         if (!window.armed()) window.arm();

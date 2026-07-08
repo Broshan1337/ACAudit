@@ -29,10 +29,18 @@ public class SlotOverlay extends Module {
         .name("shadow").description("Draw the ids with a drop shadow for readability.")
         .defaultValue(true).build()
     );
+    private final Setting<Boolean> showSyncId = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-sync-id").description("Draw the container's syncId and revision above the GUI — the exact values the dupe/manual-click modules need.")
+        .defaultValue(true).build()
+    );
+    private final Setting<Boolean> showItem = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-hovered-item").description("Draw the hovered slot's item id + count below the GUI.")
+        .defaultValue(true).build()
+    );
 
     public SlotOverlay() {
         super(AddonTemplate.DUPE_CATEGORY, "slot-overlay",
-            "Renders each slot's network id over the open GUI. Maps container/plugin layouts for the dupe modules.");
+            "Renders each slot's network id (plus syncId/revision and the hovered item) over the open GUI. Maps container/plugin layouts for the dupe modules.");
     }
 
     public int getColorPacked() {
@@ -41,4 +49,6 @@ public class SlotOverlay extends Module {
     }
 
     public boolean shadow() { return shadow.get(); }
+    public boolean showSyncId() { return showSyncId.get(); }
+    public boolean showItem() { return showItem.get(); }
 }

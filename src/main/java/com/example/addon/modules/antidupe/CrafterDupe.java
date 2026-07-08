@@ -73,7 +73,7 @@ public class CrafterDupe extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.player.currentScreenHandler == null) return;
+        if (!GuiState.containerOpen(mc)) return;   // crafter GUI only (see GuiState)
         ticksActive++;
         obs.tick();
         var handler = mc.player.currentScreenHandler;

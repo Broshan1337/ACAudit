@@ -70,7 +70,7 @@ public class AutoAuditRunner extends Module {
     // The hardest crashers — excluded by safe-mode.
     private static final List<String> SAFE_EXCLUDE = List.of(
         "nbt-bomb", "channel-flood", "snbt-depth", "structure-string-flood", "payload-flood",
-        "passenger-loop", "entity-spam", "book-crash");
+        "passenger-loop", "entity-spam");
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgSafety = settings.createGroup("Safety");
@@ -146,6 +146,7 @@ public class AutoAuditRunner extends Module {
     private ServerInfo serverInfo;
     private int rejoinsUsed;
     private long rejoinedAt;
+    private double baselineTps = -1;   // captured at run start, before crash vectors degrade the tick loop
 
     public AutoAuditRunner() {
         super(AddonTemplate.TESTING_CATEGORY, "auto-audit-runner",
@@ -158,7 +159,7 @@ public class AutoAuditRunner extends Module {
         health = Modules.get().get(ServerHealthMonitor.class);
         platformProbe = Modules.get().get("platform-probe");
         serverInfo = mc.getCurrentServerEntry();
-        rejoinsUsed = 0; lastFinding = null; lastDegraded = false;
+        rejoinsUsed = 0; lastFinding = null; lastDegraded = false; baselineTps = -1;
 
         String address = serverInfo != null ? serverInfo.address : (mc.isInSingleplayer() ? "singleplayer" : "unknown");
         if (!preflight(address)) { toggle(); return; }
@@ -293,7 +294,7 @@ public class AutoAuditRunner extends Module {
             if (pi == null) { report.add(new Finding("seq:" + seqName, "COMBO", Severity.LOW, "SKIP", List.of("packet-inspector module missing"))); startNext(); return; }
             if (!pi.isActive()) pi.toggle();
             SequenceStore.LoadResult r = SequenceStore.toPackets(sq);
-            pi.replaySaved(r.items(), 1.0);
+            pi.replaySaved(r.items(), pi.replayScale());   // honour packet-inspector's replay-speed
             if (r.versionMismatch())
                 report.addNote("seq '" + seqName + "' captured on " + r.savedVersion() + " — replay fields may differ on this version.");
             obs.reset(); obs.snapshotPre(mc.player);
@@ -339,7 +340,10 @@ public class AutoAuditRunner extends Module {
             return;
         }
 
-        if (health != null && health.isWarm()) obs.sampleTps(health.getTps());
+        if (health != null && health.isWarm()) {
+            if (baselineTps < 0) baselineTps = health.getTps();   // mandatory baseline before any crash vector runs
+            obs.sampleTps(health.getTps());
+        }
         long elapsed = System.currentTimeMillis() - phaseStart;
 
         if (phase == Phase.RUN) {
@@ -381,10 +385,14 @@ public class AutoAuditRunner extends Module {
             Step s = plan.get(index);
             List<String> det = new ArrayList<>();
             det.add("disconnected during this vector");
-            if (obs.disconnectReason != null && !obs.disconnectReason.isBlank())
-                det.add("reason: \"" + obs.disconnectReason + "\"");
+            det.add(com.example.addon.audit.KickClassifier.describe(obs.disconnectReason));
+            // A Paper limiter / anti-spam / ban kick is the server defending correctly, not a crash.
+            com.example.addon.audit.KickClassifier.Kind kind =
+                com.example.addon.audit.KickClassifier.classify(obs.disconnectReason);
+            boolean defensive = com.example.addon.audit.KickClassifier.isDefensive(kind);
             lastFinding = new Finding(String.join(" + ", s.names()), stepCategory(s),
-                Severity.CRITICAL, "DISCONNECTED", det);
+                defensive ? Severity.LOW : Severity.CRITICAL,
+                defensive ? "REJECTED(" + kind.name() + ")" : "DISCONNECTED", det);
             report.add(lastFinding);
             warning("Disconnected during '%s'%s.", String.join(" + ", s.names()),
                 obs.disconnectReason != null ? " — " + obs.disconnectReason : "");
@@ -434,6 +442,7 @@ public class AutoAuditRunner extends Module {
 
     private void finishReport() {
         if (report == null) return;
+        if (baselineTps >= 0) report.addNote(String.format("Baseline TPS at run start: %.1f (compare each vector's min TPS against this).", baselineTps));
         if (platformProbe instanceof PlatformProbe pp)
             report.setPlatform(pp.getBrand(), pp.getPlatform());
         if (compareToLast.get()) {

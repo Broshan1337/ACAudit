@@ -89,7 +89,7 @@ public class CraftGridRace extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.player.currentScreenHandler == null) return;
+        if (!GuiState.containerOpen(mc)) return;   // crafting GUI only (see GuiState)
         ticksActive++;
         obs.tick();
 

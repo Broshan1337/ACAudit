@@ -27,11 +27,23 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
  * Run against your OWN local server only.
  */
 public class ChunkBorderStress extends Module {
+    public enum ChurnMode { CHUNK_EDGE, TRACKING_RANGE }
+
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
+    private final Setting<ChurnMode> churn = sgGeneral.add(new EnumSetting.Builder<ChurnMode>()
+        .name("churn-mode")
+        .description("CHUNK_EDGE = bounce ±offset across the 16-block chunk grid (chunk-load churn); TRACKING_RANGE = jump ±range across the entity-tracking boundary (tracker add/remove churn — folded from tracker-thrash).")
+        .defaultValue(ChurnMode.CHUNK_EDGE).build()
+    );
     private final Setting<Integer> crossingsPerTick = sgGeneral.add(new IntSetting.Builder()
-        .name("crossings-per-tick").description("Chunk-boundary crossings per tick.")
+        .name("crossings-per-tick").description("Boundary crossings per tick.")
         .defaultValue(20).range(1, 500).sliderRange(1, 100).build()
+    );
+    private final Setting<Double> trackingRange = sgGeneral.add(new DoubleSetting.Builder()
+        .name("tracking-range").description("Blocks to jump out and back in TRACKING_RANGE mode (should exceed the server's entity tracking range, ~48-128).")
+        .defaultValue(80.0).range(8.0, 512.0).sliderRange(32.0, 256.0)
+        .visible(() -> churn.get() == ChurnMode.TRACKING_RANGE).build()
     );
     private final Setting<Boolean> rampMode = sgGeneral.add(new BoolSetting.Builder()
         .name("ramp-mode")
@@ -73,13 +85,13 @@ public class ChunkBorderStress extends Module {
 
     public ChunkBorderStress() {
         super(AddonTemplate.CRASH_CATEGORY, "chunk-border-stress",
-            "Ping-pongs reported position across a chunk boundary rapidly. Tests chunk-load/entity-tracking pipeline under crossing pressure.");
+            "Ping-pongs reported position across a chunk boundary (CHUNK_EDGE) or the entity-tracking range (TRACKING_RANGE). Tests chunk-load + entity-tracker debouncing under crossing pressure.");
     }
 
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; currentRate = 1; side = false;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
         if (autoMonitor.get()) {
             var shm = Modules.get().get(ServerHealthMonitor.class);
             if (shm != null && !shm.isActive()) shm.toggle();
@@ -94,15 +106,22 @@ public class ChunkBorderStress extends Module {
         if (!cadence.shouldFire()) return;
         int rate = rampMode.get() ? currentRate : crossingsPerTick.get();
         if (rampMode.get()) currentRate += rampStep.get();
+        rate = gr.scale(rate);   // apply CrashSafety PROBE ramp + intensity cap
 
-        // Snap to the nearest chunk edge (multiple of 16), then bounce ±offset
-        double base = Math.round(mc.player.getX() / 16.0) * 16.0;
-        double y = mc.player.getY();
-        double z = mc.player.getZ();
+        double baseX = mc.player.getX(), baseZ = mc.player.getZ(), y = mc.player.getY();
+        // CHUNK_EDGE snaps to the nearest chunk edge (multiple of 16), then bounces ±offset.
+        double edge = Math.round(baseX / 16.0) * 16.0;
 
         for (int i = 0; i < rate; i++) {
             side = !side;
-            double x = side ? base + offset.get() : base - offset.get();
+            double x, z;
+            if (churn.get() == ChurnMode.TRACKING_RANGE) {
+                x = side ? baseX + trackingRange.get() : baseX;
+                z = side ? baseZ + trackingRange.get() : baseZ;
+            } else {
+                x = side ? edge + offset.get() : edge - offset.get();
+                z = baseZ;
+            }
             mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.PositionAndOnGround(
                 x, y, z, true, false));
             packetsSent++;

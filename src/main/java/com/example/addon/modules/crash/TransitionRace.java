@@ -86,7 +86,7 @@ public class TransitionRace extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; windowRemaining = 0; transitions = 0;
-        gr.onActivate();
+        gr.onActivate(this);
         info("Armed. Trigger a respawn or dimension change (portal, /kill, dimension command).");
     }
 

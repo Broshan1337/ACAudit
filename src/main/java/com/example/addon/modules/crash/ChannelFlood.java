@@ -79,7 +79,7 @@ public class ChannelFlood extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; sprintState = false; slotIdx = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler

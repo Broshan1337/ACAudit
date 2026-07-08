@@ -56,7 +56,7 @@ public class RecipeAdvancementFuzz extends Module {
     }
 
     @Override
-    public void onActivate() { n = 0; gr.onActivate(); cadence.onActivate(); }
+    public void onActivate() { n = 0; gr.onActivate(this); cadence.onActivate(); }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {

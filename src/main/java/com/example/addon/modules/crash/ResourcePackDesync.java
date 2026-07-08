@@ -84,7 +84,7 @@ public class ResourcePackDesync extends Module {
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; statusIdx = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     private UUID id() { return unknownId.get() ? UUID.randomUUID() : new UUID(0L, 0L); }

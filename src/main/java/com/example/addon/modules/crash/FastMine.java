@@ -76,14 +76,14 @@ public class FastMine extends Module {
     private int timer = 0;
 
     public FastMine() {
-        super(AddonTemplate.CRASH_CATEGORY, "fast-mine",
-            "Instant-breaks the looked-at block via START/STOP packets. Tests server-side break-TIME validation (not just packet rate).");
+        super(AddonTemplate.MOVEMENT_CATEGORY, "fast-mine",
+            "Instant-breaks the looked-at block via START/STOP packets. Tests server-side break-TIME validation (AC test — not a crash/lag vector).");
     }
 
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0; timer = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler

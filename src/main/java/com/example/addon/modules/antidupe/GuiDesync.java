@@ -38,8 +38,16 @@ import java.util.List;
  * reclaim based on close-packet timing - make it atomic with the take.
  */
 public class GuiDesync extends Module {
+    /** How to order the held packets when they are released — lets you target a specific desync scenario. */
+    public enum ReleaseOrder { NATURAL, CLOSE_FIRST, CLICKS_FIRST, REVERSED }
+
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
+    private final Setting<ReleaseOrder> releaseOrder = sgGeneral.add(new EnumSetting.Builder<ReleaseOrder>()
+        .name("release-order")
+        .description("Order to flush held packets. NATURAL = as captured; CLOSE_FIRST = close(s) before clicks (close-before-act race); CLICKS_FIRST = clicks before close; REVERSED = reverse capture order.")
+        .defaultValue(ReleaseOrder.NATURAL).build()
+    );
     private final Setting<Boolean> holdClicks = sgGeneral.add(new BoolSetting.Builder()
         .name("hold-clicks").description("Hold outbound ClickSlot packets.")
         .defaultValue(true).build()
@@ -128,6 +136,7 @@ public class GuiDesync extends Module {
     }
 
     private void grabItemSlots() {
+        if (!GuiState.containerOpen(mc)) return;   // don't quick-move the player's own inventory when no container is open
         var handler = mc.player.currentScreenHandler;
         if (handler == null) return;
         int containerSlots = handler.slots.size() - 36;
@@ -147,14 +156,31 @@ public class GuiDesync extends Module {
 
     private void flush() {
         if (queue.isEmpty()) { held = 0; return; }
-        info("Releasing %d held container packets", queue.size());
-        for (Packet<?> pkt : queue) {
+        List<Packet<?>> ordered = order(queue);
+        info("Releasing %d held container packets (%s)", ordered.size(), releaseOrder.get());
+        for (Packet<?> pkt : ordered) {
             if (lastEvent != null) lastEvent.sendSilently(pkt);
             else if (mc.player != null) mc.player.networkHandler.getConnection().send(pkt);
         }
         queue.clear();
         held = 0;
         obs.markFired();
+    }
+
+    /** Reorder the held queue per the release-order scenario without dropping any packet. */
+    private List<Packet<?>> order(List<Packet<?>> q) {
+        switch (releaseOrder.get()) {
+            case REVERSED -> { List<Packet<?>> r = new ArrayList<>(q); java.util.Collections.reverse(r); return r; }
+            case CLOSE_FIRST, CLICKS_FIRST -> {
+                List<Packet<?>> closes = new ArrayList<>(), clicks = new ArrayList<>();
+                for (Packet<?> p : q) (p instanceof CloseHandledScreenC2SPacket ? closes : clicks).add(p);
+                List<Packet<?>> r = new ArrayList<>(q.size());
+                if (releaseOrder.get() == ReleaseOrder.CLOSE_FIRST) { r.addAll(closes); r.addAll(clicks); }
+                else { r.addAll(clicks); r.addAll(closes); }
+                return r;
+            }
+            default -> { return q; }
+        }
     }
 
     @EventHandler

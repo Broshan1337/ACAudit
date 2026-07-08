@@ -6,6 +6,8 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registries;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import org.spongepowered.asm.mixin.Mixin;
@@ -25,6 +27,8 @@ public abstract class SlotOverlayMixin {
 
     @Shadow protected int x;
     @Shadow protected int y;
+    @Shadow protected int backgroundHeight;
+    @Shadow protected Slot focusedSlot;
 
     @Shadow public abstract ScreenHandler getScreenHandler();
 
@@ -39,6 +43,20 @@ public abstract class SlotOverlayMixin {
 
         for (Slot slot : getScreenHandler().slots) {
             context.drawText(tr, String.valueOf(slot.id), x + slot.x, y + slot.y, color, shadow);
+        }
+
+        // syncId + revision above the GUI — the exact fields the dupe/manual-click modules consume.
+        if (overlay.showSyncId()) {
+            ScreenHandler h = getScreenHandler();
+            context.drawText(tr, "syncId " + h.syncId + "  rev " + h.getRevision(), x, y - 10, color, shadow);
+        }
+
+        // Hovered slot's item id + count below the GUI.
+        if (overlay.showItem() && focusedSlot != null) {
+            ItemStack st = focusedSlot.getStack();
+            String line = "slot " + focusedSlot.id + ": "
+                + (st.isEmpty() ? "(empty)" : Registries.ITEM.getId(st.getItem()) + " x" + st.getCount());
+            context.drawText(tr, line, x, y + backgroundHeight + 2, color, shadow);
         }
     }
 }

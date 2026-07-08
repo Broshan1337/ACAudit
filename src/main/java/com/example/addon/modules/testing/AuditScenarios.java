@@ -4,7 +4,9 @@ import com.example.addon.AddonTemplate;
 import com.example.addon.audit.AuditReport;
 import com.example.addon.audit.Finding;
 import com.example.addon.audit.Severity;
+import com.example.addon.audit.ResponseTimer;
 import com.example.addon.audit.VectorObservation;
+import com.example.addon.modules.antidupe.GuiState;
 import com.example.addon.modules.crash.ServerHealthMonitor;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -13,7 +15,10 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -46,11 +51,15 @@ import java.util.regex.Pattern;
  *   COMBO_MATRIX      — baseline each vector in a set alone, then run every PAIR and
  *                       flag the pairs whose outcome differs from either alone
  *                       (synergistic attack surfaces).
+ *   GUI_STRESS        — with a plugin GUI already OPEN, drive the GUI stress vectors
+ *                       (action-type rotation, click flood) against it, TIME each
+ *                       click→server-response, then re-run under simultaneous load and
+ *                       report whether GUI latency degrades — a per-plugin GUI report.
  *
  * Run against your OWN local server only.
  */
 public class AuditScenarios extends Module {
-    public enum Scenario { ECON_INTEGRITY, AC_COVERAGE_MAP, STABILITY_BASELINE, PLUGIN_FINGERPRINT, COMBO_MATRIX }
+    public enum Scenario { ECON_INTEGRITY, AC_COVERAGE_MAP, STABILITY_BASELINE, PLUGIN_FINGERPRINT, COMBO_MATRIX, GUI_STRESS, CRASH_SYNERGY }
     private enum Kind { VECTOR, COMBO, BALANCE }
     private enum Phase { RUN, GAP, DONE }
 
@@ -88,11 +97,20 @@ public class AuditScenarios extends Module {
     private final Setting<String> matrixSet = sgGeneral.add(new StringSetting.Builder()
         .name("matrix-set").description("MATRIX: vectors to cross — every pair is run after baselining each alone.").defaultValue("speed,shift-click-race,packet-spammer,movement-crash")
         .visible(() -> scenario.get() == Scenario.COMBO_MATRIX).build());
+    // gui stress
+    private final Setting<String> guiVectors = sgGeneral.add(new StringSetting.Builder()
+        .name("gui-vectors").description("GUI_STRESS: auto-firing GUI vectors to run against the open GUI (must fire each-tick).").defaultValue("gui-action-rotator,interaction-flood")
+        .visible(() -> scenario.get() == Scenario.GUI_STRESS).build());
+    private final Setting<String> guiLoadVector = sgGeneral.add(new StringSetting.Builder()
+        .name("gui-load-vector").description("GUI_STRESS: vector run simultaneously with the first GUI vector to test latency under load.").defaultValue("packet-spammer")
+        .visible(() -> scenario.get() == Scenario.GUI_STRESS).build());
 
     private record Task(String label, List<String> names, String category, int windowSecs, Kind kind) {}
     private final List<Task> tasks = new ArrayList<>();
     private final Map<String, double[]> baseMetrics = new HashMap<>(); // name -> {minTps,setbacks,resyncs,messages,dup}
     private final VectorObservation obs = new VectorObservation();
+    private final ResponseTimer guiTimer = new ResponseTimer();
+    private boolean timingGui;
     private AuditReport report;
     private ServerHealthMonitor health;
     private Module platformProbe;
@@ -126,6 +144,8 @@ public class AuditScenarios extends Module {
 
         buildTasks();
         if (tasks.isEmpty()) { error("Nothing to run for %s.", scenario.get()); toggle(); return; }
+        if (scenario.get() == Scenario.GUI_STRESS && !GuiState.containerOpen(mc))
+            warning("GUI_STRESS: no container GUI is open. Open the plugin GUI you want to stress (shop/vault/crate), then re-enable — otherwise the GUI vectors have nothing to click and findings will be empty.");
 
         index = -1;
         info("Scenario %s: %d step(s).", scenario.get(), tasks.size());
@@ -156,6 +176,29 @@ public class AuditScenarios extends Module {
                     for (int j = i + 1; j < set.size(); j++)
                         tasks.add(new Task(set.get(i) + " + " + set.get(j), List.of(set.get(i), set.get(j)), "COMBO", perStep.get(), Kind.COMBO));
             }
+            case GUI_STRESS -> {
+                List<String> gv = split(guiVectors.get());
+                for (String n : gv)
+                    tasks.add(new Task(n, List.of(n), "DUPE", perStep.get(), Kind.VECTOR));
+                // Under-load: run the first GUI vector simultaneously with a load vector and compare latency.
+                if (!gv.isEmpty() && Modules.get().get(guiLoadVector.get()) != null)
+                    tasks.add(new Task(gv.get(0) + " + " + guiLoadVector.get() + " (under load)",
+                        List.of(gv.get(0), guiLoadVector.get()), "COMBO", perStep.get(), Kind.COMBO));
+            }
+            case CRASH_SYNERGY -> {
+                // Curated crash × dupe/movement pairs where the COMBINATION changes the result:
+                // dupes that only open under low TPS, and movement cheats that slip under chunk-load lag.
+                String[][] pairs = {
+                    {"transition-race", "death-inventory-race"},   // race the reinit window with an inventory dupe
+                    {"packet-spammer", "gui-action-rotator"},      // GUI processing under raw-packet load
+                    {"chunk-border-stress", "speed"},              // movement AC under chunk-load churn
+                    {"movement-crash", "low-tps-reach"},           // lag-leniency reach under move stress
+                    {"nbt-query-flood", "econ-fuzz"},              // econ handler under serialize-cost load
+                };
+                for (String[] pr : pairs)
+                    if (Modules.get().get(pr[0]) != null && Modules.get().get(pr[1]) != null)
+                        tasks.add(new Task(pr[0] + " + " + pr[1], List.of(pr[0], pr[1]), "COMBO", perStep.get(), Kind.COMBO));
+            }
         }
     }
 
@@ -170,6 +213,8 @@ public class AuditScenarios extends Module {
         if (index >= tasks.size()) { finish(); return; }
         Task t = tasks.get(index);
         obs.reset(); obs.snapshotPre(mc.player);
+        guiTimer.reset();
+        timingGui = scenario.get() == Scenario.GUI_STRESS && t.kind() != Kind.BALANCE;
         capturingBalance = t.kind() == Kind.BALANCE;
         if (t.kind() == Kind.BALANCE) {
             mc.player.networkHandler.sendChatCommand(balanceCmd.get());
@@ -193,6 +238,7 @@ public class AuditScenarios extends Module {
         long elapsed = System.currentTimeMillis() - phaseStart;
 
         if (phase == Phase.RUN) {
+            if (timingGui) guiTimer.tickTimeout(1000);
             if (health != null && health.msSinceLastSample() > 6000) obs.hang = true;
             if (elapsed >= tasks.get(index).windowSecs() * 1000L) { endTask(); }
         } else if (phase == Phase.GAP) {
@@ -209,14 +255,14 @@ public class AuditScenarios extends Module {
         } else {
             stopCurrent();
             obs.snapshotPost(mc.player);
-            if (t.kind() == Kind.COMBO) report.add(classifyCombo(t));
-            else {
-                Finding f = obs.classify(t.label(), t.category(), tpsFloor.get());
-                report.add(f);
-                logFinding(f);
-                if (scenario.get() == Scenario.COMBO_MATRIX) // store single baselines
-                    baseMetrics.put(t.names().get(0), new double[]{obs.minTps, obs.setbacks, obs.resyncs, obs.messages, obs.duplicated() ? 1 : 0});
-            }
+            Finding f = (t.kind() == Kind.COMBO)
+                ? classifyCombo(t)
+                : obs.classify(t.label(), t.category(), tpsFloor.get());
+            if (timingGui) f.details().addAll(guiTimer.reportLines("click→response"));
+            report.add(f);
+            logFinding(f);
+            if (t.kind() != Kind.COMBO && scenario.get() == Scenario.COMBO_MATRIX) // store single baselines
+                baseMetrics.put(t.names().get(0), new double[]{obs.minTps, obs.setbacks, obs.resyncs, obs.messages, obs.duplicated() ? 1 : 0});
         }
         phase = Phase.GAP; phaseStart = System.currentTimeMillis();
     }
@@ -259,9 +305,17 @@ public class AuditScenarios extends Module {
     private double lastBalance = Double.NaN;
 
     @EventHandler
+    private void onSend(PacketEvent.Send event) {
+        if (phase == Phase.RUN && timingGui && event.packet instanceof ClickSlotC2SPacket) guiTimer.markFire();
+    }
+
+    @EventHandler
     private void onReceive(PacketEvent.Receive event) {
         if (phase != Phase.RUN) return;
         obs.onPacket(event.packet);
+        if (timingGui && (event.packet instanceof ScreenHandlerSlotUpdateS2CPacket
+            || event.packet instanceof InventoryS2CPacket
+            || event.packet instanceof GameMessageS2CPacket)) guiTimer.markResponse();
         if (capturingBalance && event.packet instanceof GameMessageS2CPacket m) {
             String text = m.content().getString();
             String low = text.toLowerCase();

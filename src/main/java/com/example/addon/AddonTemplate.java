@@ -29,6 +29,7 @@ import com.example.addon.modules.antidupe.DropPickupDupe;
 import com.example.addon.modules.antidupe.EconFuzz;
 import com.example.addon.modules.antidupe.EnderChestDesync;
 import com.example.addon.modules.antidupe.GuiClicker;
+import com.example.addon.modules.antidupe.GuiActionRotator;
 import com.example.addon.modules.antidupe.GuiDesync;
 import com.example.addon.modules.antidupe.InteractionFlood;
 import com.example.addon.modules.antidupe.InventorySweep;
@@ -41,6 +42,9 @@ import com.example.addon.modules.antidupe.ShulkerRace;
 import com.example.addon.modules.antidupe.SlotExploit;
 import com.example.addon.modules.antidupe.SlotOverlay;
 import com.example.addon.modules.antidupe.TwoWindowRace;
+import com.example.addon.modules.antidupe.WindowSwapRace;
+import com.example.addon.modules.antidupe.CrateResultRace;
+import com.example.addon.modules.antidupe.EnchantResultRace;
 import com.example.addon.modules.antidupe.SlotSyncProbe;
 import com.example.addon.modules.antidupe.EventOrderProbe;
 import com.example.addon.modules.antidupe.VaultValueProbe;
@@ -98,6 +102,11 @@ import com.example.addon.modules.movement.VehicleSimGap;
 import com.example.addon.modules.movement.RespawnModelReset;
 import com.example.addon.modules.movement.FlightClaim;
 import com.example.addon.modules.movement.InputToggleDesync;
+import com.example.addon.modules.movement.FalsePositiveAudit;
+import com.example.addon.modules.antidupe.GUICloseAnomaly;
+import com.example.addon.modules.antidupe.MerchantTradeFuzz;
+import com.example.addon.modules.antidupe.XCarryProbe;
+import com.example.addon.modules.antidupe.VehicleContainerDupe;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
@@ -215,6 +224,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new RespawnModelReset());
         Modules.get().add(new FlightClaim());
         Modules.get().add(new InputToggleDesync());
+        Modules.get().add(new FalsePositiveAudit());
 
         // --- Anti-dupe ---
         Modules.get().add(new SlotExploit());
@@ -230,8 +240,10 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new SellRace());
         Modules.get().add(new AuctionRace());
         Modules.get().add(new GuiClicker());
+        Modules.get().add(new GuiActionRotator());
         Modules.get().add(new ManualClick());
         Modules.get().add(new TwoWindowRace());
+        Modules.get().add(new WindowSwapRace());
         Modules.get().add(new CloseClick());
         Modules.get().add(new SlotOverlay());
         Modules.get().add(new ShulkerRace());
@@ -261,19 +273,24 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new EventBypassProbe());
         Modules.get().add(new SpectatorTransition());
         Modules.get().add(new TradeShopOverlap());
+        Modules.get().add(new CrateResultRace());
+        Modules.get().add(new EnchantResultRace());
+        // --- Anti-dupe: GUI close + merchant-trade anomalies ---
+        Modules.get().add(new GUICloseAnomaly());
+        Modules.get().add(new MerchantTradeFuzz());
+        // --- Anti-dupe: Autism-Client-derived vectors (studied, reimplemented) ---
+        Modules.get().add(new XCarryProbe());
+        Modules.get().add(new VehicleContainerDupe());
 
         // --- Crash / stability ---
         Modules.get().add(new PayloadFlood());
         Modules.get().add(new NbtBomb());
-        Modules.get().add(new NanPosition());
-        Modules.get().add(new ExtremeVelocity());
         Modules.get().add(new BlockInteractionSpam());
         Modules.get().add(new ArmAnimationFlood());
         Modules.get().add(new SellCommandFuzz());
 
         // --- Crash addon ports ---
         Modules.get().add(new PositionCrash());
-        Modules.get().add(new BookCrash());
         Modules.get().add(new CompletionCrash());
         Modules.get().add(new RecipeAdvancementFuzz());
         Modules.get().add(new UnloadedChunkInteract());
@@ -287,7 +304,6 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new MovementCrash());
         Modules.get().add(new PacketSpammer());
         Modules.get().add(new SequenceCrash());
-        Modules.get().add(new WindowCrash());
         Modules.get().add(new SnbtDepth());
         Modules.get().add(new StructureStringFlood());
         Modules.get().add(new BeaconCrash());
@@ -306,13 +322,15 @@ public class AddonTemplate extends MeteorAddon {
 
         // --- Deep-coverage vectors (asymmetric cost, state transitions, edge surfaces) ---
         Modules.get().add(new NbtQueryFlood());
-        Modules.get().add(new TrackerThrash());
         Modules.get().add(new ChunkAckSpoof());
         Modules.get().add(new RespawnRace());
         Modules.get().add(new StatsRequestFlood());
         Modules.get().add(new ResourcePackDesync());
         Modules.get().add(new SpectatorTpEdge());
         Modules.get().add(new TransitionRace());
+        Modules.get().add(new WorldgenCrawler());
+        Modules.get().add(new EconGuiOverload());
+        Modules.get().add(new SchedulerSoak());
 
         // --- Testing tab: diagnostics, automated harness, experimental abuse ---
         Modules.get().add(new ServerHealthMonitor());
@@ -336,13 +354,24 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new PacketCadenceMonitor());
         Modules.get().add(new CombatPatternMonitor());
         Modules.get().add(new CommandRateLimitProbe());
+        Modules.get().add(new CommandCooldownRace());
         Modules.get().add(new AutoAuditRunner());
         Modules.get().add(new AuditScenarios());
         Modules.get().add(new PacketInspector());
+        // --- New probes: pre-flight, sub-tick state, interaction/session anomalies, rate-gap ---
+        Modules.get().add(new PreFlightCheck());
+        Modules.get().add(new PlayerStateAnomaly());
+        Modules.get().add(new EntityInteractAnomaly());
+        Modules.get().add(new ChatSignatureFuzz());
+        Modules.get().add(new RateGapProbe());
+        Modules.get().add(new SessionAnomaly());
+        Modules.get().add(new ServerTickSync());
 
         // --- Injection ---
         Modules.get().add(new com.example.addon.modules.injection.SqlInjectionFuzz());
         Modules.get().add(new com.example.addon.modules.injection.PluginFuzz());
+        Modules.get().add(new com.example.addon.modules.injection.PlaceholderApiProbe());
+        Modules.get().add(new com.example.addon.modules.injection.AnvilNameInjection());
 
         Commands.add(new CommandExample());
         Hud.get().register(HudExample.INFO);

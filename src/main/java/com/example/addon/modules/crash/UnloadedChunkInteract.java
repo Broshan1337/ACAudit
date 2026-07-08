@@ -54,7 +54,7 @@ public class UnloadedChunkInteract extends Module {
     }
 
     @Override
-    public void onActivate() { n = 0; txn = 0; gr.onActivate(); cadence.onActivate(); }
+    public void onActivate() { n = 0; txn = 0; gr.onActivate(this); cadence.onActivate(); }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {

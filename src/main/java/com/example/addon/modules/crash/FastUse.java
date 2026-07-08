@@ -58,14 +58,14 @@ public class FastUse extends Module {
     private int ticksActive = 0, packetsSent = 0;
 
     public FastUse() {
-        super(AddonTemplate.CRASH_CATEGORY, "ac-fast-use",
-            "Triggers item use faster than vanilla allows. Tests server-side use/cooldown enforcement (eat, pearl, potion).");
+        super(AddonTemplate.MOVEMENT_CATEGORY, "ac-fast-use",
+            "Triggers item use faster than vanilla allows. Tests server-side use/cooldown enforcement (AC test — not a crash/lag vector).");
     }
 
     @Override
     public void onActivate() {
         ticksActive = 0; packetsSent = 0;
-        cadence.onActivate(); gr.onActivate(); preStress.onActivate(this);
+        cadence.onActivate(); gr.onActivate(this); preStress.onActivate(this);
     }
 
     @EventHandler
@@ -77,6 +77,7 @@ public class FastUse extends Module {
         Hand hand = offhand.get() ? Hand.OFF_HAND : Hand.MAIN_HAND;
         for (int i = 0; i < usesPerTick.get(); i++) {
             mc.interactionManager.interactItem(mc.player, hand);
+            packetsSent++;
         }
         gr.markFired();
         TestCadence.sendLegit(mc.player, cadence.legitRatio());
