@@ -1,13 +1,13 @@
 # Contributing to ACAudit
 
-ACAudit is a **defensive, own-server** security-audit tool. Everything here exists to find vulnerabilities so they can be **patched** — not to attack servers you do not own. Two parts of ACAudit are designed to be extended by the community **without touching code**: the plugin-specific payload library and the saved packet-sequence library.
+ACAudit is a **defensive, own-server** security-audit tool. Everything here exists to find vulnerabilities so they can be **patched** - not to attack servers you do not own. Two parts of ACAudit are designed to be extended by the community **without touching code**: the plugin-specific payload library and the saved packet-sequence library.
 
 ## 1. Plugin-specific payload library
 
 The plugin-aware fuzzer (`plugin-fuzz`) is driven by a data file, not hardcoded payloads.
 
 - **Bundled default:** `src/main/resources/assets/acaudit/plugin_payloads.json`
-- **User/community override:** drop an edited copy at `config/acaudit/plugin_payloads.json` in your Minecraft directory. Entries are merged **by plugin `id`** (your file overrides the bundled entry with the same id, and adds new ones). No rebuild required — restart the game or toggle the module.
+- **User/community override:** drop an edited copy at `config/acaudit/plugin_payloads.json` in your Minecraft directory. Entries are merged **by plugin `id`** (your file overrides the bundled entry with the same id, and adds new ones). No rebuild required - restart the game or toggle the module.
 
 ### Schema
 
@@ -46,8 +46,8 @@ The plugin-aware fuzzer (`plugin-fuzz`) is driven by a data file, not hardcoded 
 
 ### Rules for good contributions
 
-1. **Be honest about storage.** SQLi only works where SQL exists. If a plugin stores the targeted data in flat files (e.g. EssentialsX userdata), set `storage: "FLATFILE"` and contribute `FORMAT`/`LENGTH`/`SPECIAL` payloads instead — the fuzzer **skips SQLi on FLATFILE** targets on purpose.
-2. **Char-filter safe.** Every payload must be ASCII-printable. Minecraft's command filter kicks on chars below `0x20`, `0x7F`, or the section sign — those test the server filter, not the plugin.
+1. **Be honest about storage.** SQLi only works where SQL exists. If a plugin stores the targeted data in flat files (e.g. EssentialsX userdata), set `storage: "FLATFILE"` and contribute `FORMAT`/`LENGTH`/`SPECIAL` payloads instead - the fuzzer **skips SQLi on FLATFILE** targets on purpose.
+2. **Char-filter safe.** Every payload must be ASCII-printable. Minecraft's command filter kicks on chars below `0x20`, `0x7F`, or the section sign - those test the server filter, not the plugin.
 3. **Quality over quantity.** A few payloads that match the plugin's exact command syntax and DB dialect beat a large generic list.
 4. **Document each payload** with `note`, `vulnerableSignal`, and a per-plugin `disclosureUrl` + `fixExample`.
 5. **Safe defaults.** Mark anything that changes/deletes data `destructive: true`, and anything that intentionally lags the server with `delayMs > 0`. Both are off unless the auditor explicitly enables them.
